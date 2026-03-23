@@ -91,6 +91,7 @@ export class IsoScene extends Phaser.Scene {
     this.addPlayer();
     this.setupInput();
     this.addHud();
+    this.connectToLobby().catch(console.error);
   }
 
   /**
@@ -295,10 +296,18 @@ export class IsoScene extends Phaser.Scene {
     this.redrawPlayer();
   }
 
+  /** Connect to Colyseus LobbyRoom on startup. */
+  private async connectToLobby(): Promise<void> {
+    const { Client } = await import('colyseus.js');
+    const client = new Client('ws://localhost:3000');
+    await client.joinOrCreate('lobby');
+    console.log('[S1-06] connected to lobby');
+  }
+
   /** Fixed HUD line — confirms milestone and tile spec at a glance. */
   private addHud(): void {
     this.add
-      .text(8, 8, 'S1-05 ✓  WASD to move · H=hat · depth-sorted · bounds-clamped', {
+      .text(8, 8, 'S1-06 ✓  WASD to move · H=hat · depth-sorted · Colyseus connected', {
         fontSize: '13px',
         color: '#aabbcc',
         backgroundColor: '#00000055',
