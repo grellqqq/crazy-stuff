@@ -10,10 +10,60 @@ export const TILE_H = 16;
 const GRID_COLS = 15;
 const GRID_ROWS = 15;
 
-const TILE_COLOR_A = 0x4a7c59; // muted green
-const TILE_COLOR_B = 0x3d6649; // slightly darker green
 const TILE_OUTLINE = 0x000000;
 const ORIGIN_COLOR = 0xff6b6b; // red — marks tile (0,0)
+
+// ─── Terrain system (visual only — game logic wired in a later sprint) ─────────
+
+/**
+ * Terrain type identifiers. Values are stable — the server will import this
+ * module when terrain effects are implemented.
+ */
+export const Terrain = {
+  Normal:  0,
+  Slow:    1,
+  Slide:   2,
+  Crumble: 3,
+  Boost:   4,
+  Hole:    5,
+} as const;
+
+/**
+ * Primary and secondary fill colours [A, B] for the checkerboard shading.
+ * Indexed by Terrain value. A = even (tx+ty), B = odd.
+ */
+const TERRAIN_COLORS: [number, number][] = [
+  [0x4a7c59, 0x3d6649], // Normal  — muted green
+  [0x7a6030, 0x6a5228], // Slow    — mud brown
+  [0x88c8e8, 0x76b8d8], // Slide   — ice blue
+  [0xc4824a, 0xb0723c], // Crumble — sandy orange
+  [0xd4b800, 0xc0a600], // Boost   — gold
+  [0x111820, 0x0c1018], // Hole    — near-black void
+];
+
+/**
+ * Hardcoded race track. Indexed [tileY][tileX].
+ * Race flows top-to-bottom: tileX+tileY increases toward the finish.
+ *
+ *  0 Normal · 1 Slow · 2 Slide · 3 Crumble · 4 Boost · 5 Hole
+ */
+export const TERRAIN_MAP: number[][] = [
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // row  0 ── START
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // row  1
+  [0,0,1,1,0,0,0,0,0,0,1,1,0,0,0], // row  2 ── slow mud flanks centre lane
+  [0,0,1,1,1,0,0,0,0,1,1,1,0,0,0], // row  3
+  [0,0,0,0,0,4,4,4,4,0,0,0,0,0,0], // row  4 ── first boost corridor
+  [0,0,0,0,4,4,0,0,4,4,0,0,0,0,0], // row  5
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // row  6 ── breather
+  [0,0,0,2,2,2,2,2,2,2,2,0,0,0,0], // row  7 ── ice / slide zone begins
+  [0,0,2,2,2,2,2,2,2,2,2,2,0,0,0], // row  8
+  [0,0,2,2,4,2,2,2,2,4,2,2,0,0,0], // row  9 ── boost pads hidden inside ice
+  [0,0,0,3,3,3,5,5,3,3,3,0,0,0,0], // row 10 ── crumble bridge with hole pits
+  [0,0,3,3,3,3,5,5,3,3,3,3,0,0,0], // row 11
+  [0,0,0,3,0,3,0,3,0,3,0,0,0,0,0], // row 12 ── crumble / normal gaps — pick your path
+  [0,0,0,0,4,4,4,4,4,4,0,0,0,0,0], // row 13 ── final boost dash
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // row 14 ── FINISH
+];
 
 /** Color assigned to each player slot index. Slot 0 = orange (first joiner). */
 const SLOT_COLORS = [0xff8c00, 0x4488ff, 0x44bb44, 0xee44ee, 0xffdd44];
@@ -126,11 +176,13 @@ export class IsoScene extends Phaser.Scene {
 
     for (let ty = 0; ty < GRID_ROWS; ty++) {
       for (let tx = 0; tx < GRID_COLS; tx++) {
+        const terrain = TERRAIN_MAP[ty][tx] ?? Terrain.Normal;
+        const [colorA, colorB] = TERRAIN_COLORS[terrain];
+        const fill = (tx + ty) % 2 === 0 ? colorA : colorB;
+
         const { x, y } = tileToScreen(tx, ty);
         const sx = this.originX + x;
         const sy = this.originY + y;
-        const fill = (tx + ty) % 2 === 0 ? TILE_COLOR_A : TILE_COLOR_B;
-
         const pts = this.rhombusPoints(sx, sy);
 
         gfx.fillStyle(fill, 1);
@@ -349,7 +401,7 @@ export class IsoScene extends Phaser.Scene {
   /** Fixed HUD — confirms milestone at a glance. */
   private addHud(): void {
     this.add
-      .text(8, 8, 'S1-07 ✓  WASD to move · H=hat · depth-sorted · RaceRoom (server-auth)', {
+      .text(8, 8, 'S1-08 ✓  Terrain: green=Normal · brown=Slow · blue=Ice · orange=Crumble · gold=Boost · black=Hole', {
         fontSize: '13px',
         color: '#aabbcc',
         backgroundColor: '#00000055',
