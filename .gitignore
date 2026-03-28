@@ -111,6 +111,9 @@ node_modules/
 credentials.json
 secrets.json
 
+# === Raw Assets (source art, not for repo — processed sprites go in src/client/public/) ===
+assets/
+
 # === Large Binary Assets (use Git LFS instead) ===
 # Uncomment and configure with Git LFS for your project:
 # *.png

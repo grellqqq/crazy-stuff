@@ -3,13 +3,14 @@ import { Schema, ArraySchema, type } from '@colyseus/schema';
 import {
   Terrain, generateTerrainMap, generateButtons, generatePickups,
   GRID_COL_MAX, GRID_ROW_MAX, SPAWN_X, SPAWN_Y,
-  FOOTPRINT, HOLE_THRESHOLD,
   RacePhase, FINISH_X, FINISH_Y_MIN, FINISH_Y_MAX,
   MIN_PLAYERS_TO_START, COUNTDOWN_SECONDS, FINISH_COUNTDOWN_SECONDS, RESET_DELAY_MS,
   ButtonType, BUTTON_COOLDOWN_MS,
   PickupType, PICKUP_SPEED_COOLDOWN, PICKUP_SPEED_DURATION,
   SLIME_SIZE, SLIME_PERSIST_MS, SLIME_STUCK_MS,
   KNOCKBACK_RADIUS, KNOCKBACK_DISTANCE, KNOCKBACK_SLOW_MS, KNOCKBACK_SLOW_CD,
+  SPRINT_COOLDOWN, STAMINA_MAX, STAMINA_DRAIN, STAMINA_REGEN_RATE, STAMINA_MIN_TO_SPRINT,
+  JUMP_DISTANCE, JUMP_COOLDOWN_MS,
   POSITION_POINTS, DNF_POINTS,
   BONUS_BUTTON_ACTIVATED, BONUS_FAST_FINISH, BONUS_GOOD_FINISH,
   FAST_FINISH_THRESHOLD, GOOD_FINISH_THRESHOLD,
@@ -38,8 +39,8 @@ class RaceState extends Schema {
 const MOVE_DELTAS: Record<string, [number, number]> = {
   W: [-1, -1], S: [1, 1], A: [-1, 1], D: [1, -1],
 };
-const MOVE_MAX_X = GRID_COL_MAX - (FOOTPRINT - 1);
-const MOVE_MAX_Y = GRID_ROW_MAX - (FOOTPRINT - 1);
+const MOVE_MAX_X = GRID_COL_MAX;
+const MOVE_MAX_Y = GRID_ROW_MAX;
 
 // ─── Timing (ms) ─────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ const HOLE_RESPAWN_MS  = 3000;
 const HOLE_PENALTY_MS  = 3000;
 const HOLE_PENALTY_CD  = 650;
 const CRUMBLE_DELAY_MS = 1500;
-const SLIDE_EXTRA_TILES = 4;
+const SLIDE_EXTRA_TILES = 2;
 
 // ─── Per-player state ────────────────────────────────────────────────────────
 
@@ -71,6 +72,15 @@ interface PlayerState {
   stuckUntil: number;           // timestamp (slime effect)
   knockbackSlowUntil: number;   // timestamp
   knockbackSlowTimer: ReturnType<typeof setTimeout> | null;
+  // Sprint & stamina
+  stamina: number;
+  lastStaminaRegen: number;     // timestamp of last regen tick
+  sprinting: boolean;
+  // Jump
+  lastJumpTime: number;
+  // Last safe position (before falling in a hole)
+  lastSafeX: number;
+  lastSafeY: number;
 }
 
 function newPlayerState(): PlayerState {
@@ -91,6 +101,12 @@ function newPlayerState(): PlayerState {
     stuckUntil: 0,
     knockbackSlowUntil: 0,
     knockbackSlowTimer: null,
+    stamina: STAMINA_MAX,
+    lastStaminaRegen: 0,
+    sprinting: false,
+    lastJumpTime: 0,
+    lastSafeX: SPAWN_X,
+    lastSafeY: SPAWN_Y,
   };
 }
 
@@ -133,6 +149,8 @@ export class RaceRoom extends Room<RaceState> {
   private collectedPickups = new Set<number>();
   /** Active slime zones on the map. */
   private slimeZones: SlimeZone[] = [];
+  /** Last movement direction per player (for jump). */
+  private lastDirection = new Map<string, string>();
 
   // Race phase
   private phase: number = RacePhase.Waiting;
@@ -150,12 +168,18 @@ export class RaceRoom extends Room<RaceState> {
     this.setState(new RaceState());
     this.generateMap();
 
-    this.onMessage('move', (client, direction: string) => {
-      this.handleMove(client.sessionId, direction);
+    this.onMessage('move', (client, data: { direction: string; sprint?: boolean }) => {
+      const dir = typeof data === 'string' ? data : data.direction;
+      const sprint = typeof data === 'object' && !!data.sprint;
+      this.handleMove(client.sessionId, dir, sprint);
     });
 
     this.onMessage('usePickup', (client) => {
       this.handleUsePickup(client.sessionId);
+    });
+
+    this.onMessage('jump', (client) => {
+      this.handleJump(client.sessionId);
     });
 
     console.log(`[RaceRoom] created — ${this.buttons.length} buttons, ${this.pickups.length} pickups`);
@@ -172,13 +196,19 @@ export class RaceRoom extends Room<RaceState> {
     const slot = this.state.slots.find(s => !s.occupied);
     if (!slot) { client.leave(); return; }
 
+    const idx = this.state.slots.indexOf(slot);
+    const spawnY = SPAWN_Y - 4 + idx * 2; // 5 players spaced 1 tile apart
+
     slot.sessionId = client.sessionId;
     slot.playerName = options?.playerName ?? 'Player';
     slot.tileX = SPAWN_X;
-    slot.tileY = SPAWN_Y;
+    slot.tileY = spawnY;
     slot.occupied = true;
 
-    this.players.set(client.sessionId, newPlayerState());
+    const ps = newPlayerState();
+    ps.lastSafeX = SPAWN_X;
+    ps.lastSafeY = spawnY;
+    this.players.set(client.sessionId, ps);
 
     client.send('mapData', {
       map: this.terrainGrid,
@@ -186,7 +216,6 @@ export class RaceRoom extends Room<RaceState> {
       pickups: this.pickups,
     });
 
-    const idx = this.state.slots.indexOf(slot);
     console.log(`[RaceRoom] joined: ${client.sessionId} as "${slot.playerName}" in slot ${idx}`);
     this.broadcastState();
     this.checkStartCondition();
@@ -205,6 +234,7 @@ export class RaceRoom extends Room<RaceState> {
 
     this.clearPlayerTimers(client.sessionId);
     this.players.delete(client.sessionId);
+    this.lastDirection.delete(client.sessionId);
 
     console.log(`[RaceRoom] left: ${client.sessionId} freed slot ${idx}`);
     this.broadcastState();
@@ -275,13 +305,8 @@ export class RaceRoom extends Room<RaceState> {
     const ps = this.players.get(sessionId);
     if (!ps || ps.finished) return;
 
-    for (let dy = 0; dy < FOOTPRINT; dy++) {
-      for (let dx = 0; dx < FOOTPRINT; dx++) {
-        if (slot.tileX + dx >= FINISH_X && slot.tileY + dy >= FINISH_Y_MIN && slot.tileY + dy <= FINISH_Y_MAX) {
-          this.playerFinished(sessionId, slot, ps);
-          return;
-        }
-      }
+    if (slot.tileX >= FINISH_X && slot.tileY >= FINISH_Y_MIN && slot.tileY <= FINISH_Y_MAX) {
+      this.playerFinished(sessionId, slot, ps);
     }
   }
 
@@ -378,12 +403,17 @@ export class RaceRoom extends Room<RaceState> {
       pickups: this.pickups,
     });
 
-    for (const slot of this.state.slots) {
-      if (!slot.occupied) continue;
+    for (let i = 0; i < this.state.slots.length; i++) {
+      const slot = this.state.slots[i];
+      if (!slot || !slot.occupied) continue;
+      const spawnY = SPAWN_Y - 4 + i * 2;
       slot.tileX = SPAWN_X;
-      slot.tileY = SPAWN_Y;
+      slot.tileY = spawnY;
       this.clearPlayerTimers(slot.sessionId);
-      this.players.set(slot.sessionId, newPlayerState());
+      const ps = newPlayerState();
+      ps.lastSafeX = SPAWN_X;
+      ps.lastSafeY = spawnY;
+      this.players.set(slot.sessionId, ps);
     }
 
     this.phase = RacePhase.Waiting;
@@ -397,7 +427,7 @@ export class RaceRoom extends Room<RaceState> {
 
   // ─── Movement ──────────────────────────────────────────────────────────
 
-  private handleMove(sessionId: string, direction: string): void {
+  private handleMove(sessionId: string, direction: string, sprint = false): void {
     if (this.phase !== RacePhase.Racing) return;
 
     const slot = this.state.slots.find(s => s.sessionId === sessionId);
@@ -411,12 +441,31 @@ export class RaceRoom extends Room<RaceState> {
     if (ps.stuckUntil > Date.now()) return;
 
     const now = Date.now();
-    // Speed boost overrides cooldown
-    const activeCooldown = (ps.speedBoostUntil > now)
-      ? PICKUP_SPEED_COOLDOWN
-      : (ps.knockbackSlowUntil > now)
-        ? KNOCKBACK_SLOW_CD
-        : ps.penalized ? HOLE_PENALTY_CD : ps.currentCooldown;
+
+    // Stamina regen (when not sprinting)
+    if (ps.lastStaminaRegen > 0 && !ps.sprinting) {
+      const elapsed = (now - ps.lastStaminaRegen) / 1000;
+      ps.stamina = Math.min(STAMINA_MAX, ps.stamina + elapsed * STAMINA_REGEN_RATE);
+    }
+    ps.lastStaminaRegen = now;
+
+    // Determine if actually sprinting
+    const wantsSprint = sprint && ps.stamina >= STAMINA_MIN_TO_SPRINT;
+    ps.sprinting = wantsSprint;
+
+    // Determine active cooldown — priority: speed pickup > sprint > knockback slow > penalty > terrain
+    let activeCooldown: number;
+    if (ps.speedBoostUntil > now) {
+      activeCooldown = PICKUP_SPEED_COOLDOWN;
+    } else if (wantsSprint) {
+      activeCooldown = SPRINT_COOLDOWN;
+    } else if (ps.knockbackSlowUntil > now) {
+      activeCooldown = KNOCKBACK_SLOW_CD;
+    } else if (ps.penalized) {
+      activeCooldown = HOLE_PENALTY_CD;
+    } else {
+      activeCooldown = ps.currentCooldown;
+    }
 
     if (ps.boostCharges > 0) {
       ps.boostCharges--;
@@ -424,66 +473,110 @@ export class RaceRoom extends Room<RaceState> {
       return;
     }
 
+    // Drain stamina on sprint move
+    if (wantsSprint) {
+      ps.stamina = Math.max(0, ps.stamina - STAMINA_DRAIN);
+    }
+
     const newX = Math.max(0, Math.min(MOVE_MAX_X, slot.tileX + delta[0]));
     const newY = Math.max(0, Math.min(MOVE_MAX_Y, slot.tileY + delta[1]));
     if (newX === slot.tileX && newY === slot.tileY) return;
-    if (this.footprintHasWall(newX, newY)) return;
+    if (this.isWall(newX, newY)) return;
+
+    // Save current position as last safe spot (before we step onto potentially dangerous terrain)
+    ps.lastSafeX = slot.tileX;
+    ps.lastSafeY = slot.tileY;
 
     slot.tileX = newX;
     slot.tileY = newY;
     ps.lastMoveTime = now;
+    this.lastDirection.set(sessionId, direction);
 
-    this.applyFootprintTerrain(sessionId, slot, ps, direction);
+    this.applyTerrainAt(sessionId, slot, ps, direction);
     this.checkPickupCollection(sessionId, slot, ps);
     this.checkSlimeZones(sessionId, slot, ps);
     this.checkFinishLine(sessionId, slot);
     this.broadcastState();
   }
 
-  // ─── Footprint-based terrain effects ───────────────────────────────────
+  // ─── Jump ──────────────────────────────────────────────────────────────
 
-  private applyFootprintTerrain(
+  private handleJump(sessionId: string): void {
+    if (this.phase !== RacePhase.Racing) return;
+
+    const slot = this.state.slots.find(s => s.sessionId === sessionId);
+    const ps = this.players.get(sessionId);
+    if (!slot || !ps || ps.finished || ps.frozen) return;
+    if (ps.stuckUntil > Date.now()) return;
+
+    const now = Date.now();
+    if (now - ps.lastJumpTime < JUMP_COOLDOWN_MS) return;
+
+    const delta = MOVE_DELTAS[this.lastDirection.get(sessionId) ?? 'D'];
+    if (!delta) return;
+
+    // Jump JUMP_DISTANCE tiles in facing direction, skipping middle tile effects
+    let landX = slot.tileX;
+    let landY = slot.tileY;
+
+    for (let step = 0; step < JUMP_DISTANCE; step++) {
+      const nx = Math.max(0, Math.min(MOVE_MAX_X, landX + delta[0]));
+      const ny = Math.max(0, Math.min(MOVE_MAX_Y, landY + delta[1]));
+      if (nx === landX && ny === landY) break;
+      if (this.isWall(nx, ny)) break;
+      landX = nx;
+      landY = ny;
+    }
+
+    // Must have actually moved
+    if (landX === slot.tileX && landY === slot.tileY) return;
+
+    ps.lastJumpTime = now;
+    ps.lastMoveTime = now;
+    slot.tileX = landX;
+    slot.tileY = landY;
+
+    // Only apply terrain effects at landing position (skipped middle tiles)
+    this.applyTerrainAt(sessionId, slot, ps, this.lastDirection.get(sessionId) ?? 'D');
+    this.checkPickupCollection(sessionId, slot, ps);
+    this.checkSlimeZones(sessionId, slot, ps);
+    this.checkFinishLine(sessionId, slot);
+
+    this.broadcast('playerJumped', { sessionId });
+    this.broadcastState();
+  }
+
+  // ─── Single-tile terrain effects ────────────────────────────────────────
+
+  private applyTerrainAt(
     sessionId: string, slot: PlayerSlot, ps: PlayerState, direction: string,
   ): void {
-    let holeCount = 0;
-    let hasSlide = false;
-    let hasSlow = false;
-    let hasButton = false;
-    const crumbleTiles: [number, number][] = [];
-
-    for (let dy = 0; dy < FOOTPRINT; dy++) {
-      for (let dx = 0; dx < FOOTPRINT; dx++) {
-        const t = this.terrainAtMut(slot.tileX + dx, slot.tileY + dy);
-        switch (t) {
-          case Terrain.Hole:    holeCount++; break;
-          case Terrain.Slide:   hasSlide = true; break;
-          case Terrain.Slow:    hasSlow = true; break;
-          case Terrain.Crumble: crumbleTiles.push([slot.tileX + dx, slot.tileY + dy]); break;
-          case Terrain.Button:  hasButton = true; break;
-        }
-      }
-    }
+    const t = this.terrainAtMut(slot.tileX, slot.tileY);
 
     ps.currentCooldown = ps.penalized ? HOLE_PENALTY_CD : DEFAULT_COOLDOWN;
 
-    // Shield absorbs hole/freeze
-    if (holeCount >= HOLE_THRESHOLD) {
-      if (ps.shieldActive) {
-        ps.shieldActive = false;
-        this.broadcast('shieldUsed', { sessionId });
-      } else {
-        this.handleHole(sessionId, slot, ps);
+    switch (t) {
+      case Terrain.Hole:
+        if (ps.shieldActive) {
+          ps.shieldActive = false;
+          this.broadcast('shieldUsed', { sessionId });
+        } else {
+          this.handleHole(sessionId, slot, ps);
+        }
         return;
-      }
+      case Terrain.Slide:
+        this.handleSlide(sessionId, slot, ps, direction);
+        return;
+      case Terrain.Crumble:
+        this.handleCrumble(slot.tileX, slot.tileY);
+        break;
+      case Terrain.Slow:
+        ps.currentCooldown = SLOW_COOLDOWN;
+        break;
+      case Terrain.Button:
+        this.tryActivateButton(sessionId, slot.tileX, slot.tileY);
+        break;
     }
-
-    if (hasSlide) {
-      this.handleSlide(sessionId, slot, ps, direction);
-      return;
-    }
-    for (const [cx, cy] of crumbleTiles) this.handleCrumble(cx, cy);
-    if (hasSlow) ps.currentCooldown = SLOW_COOLDOWN;
-    if (hasButton) this.tryActivateButton(sessionId, slot.tileX, slot.tileY);
   }
 
   private handleHole(sessionId: string, slot: PlayerSlot, ps: PlayerState): void {
@@ -493,7 +586,7 @@ export class RaceRoom extends Room<RaceState> {
       const s = this.state.slots.find(sl => sl.sessionId === sessionId);
       const p = this.players.get(sessionId);
       if (!s || !p) return;
-      s.tileX = SPAWN_X; s.tileY = SPAWN_Y;
+      s.tileX = p.lastSafeX; s.tileY = p.lastSafeY;
       p.frozen = false; p.holeTimer = null;
       p.penalized = true; p.currentCooldown = HOLE_PENALTY_CD;
       p.penaltyTimer = setTimeout(() => {
@@ -515,33 +608,25 @@ export class RaceRoom extends Room<RaceState> {
       const nx = Math.max(0, Math.min(MOVE_MAX_X, slot.tileX + delta[0]));
       const ny = Math.max(0, Math.min(MOVE_MAX_Y, slot.tileY + delta[1]));
       if (nx === slot.tileX && ny === slot.tileY) break;
-      if (this.footprintHasWall(nx, ny)) break;
-      slot.tileX = nx; slot.tileY = ny;
+      if (this.terrainAtMut(nx, ny) === Terrain.Wall) break;
 
-      let holes = 0; let slideFound = false;
-      for (let dy = 0; dy < FOOTPRINT; dy++) {
-        for (let dx = 0; dx < FOOTPRINT; dx++) {
-          const t = this.terrainAtMut(nx + dx, ny + dy);
-          if (t === Terrain.Hole) holes++;
-          if (t === Terrain.Slide) slideFound = true;
-          if (t === Terrain.Crumble) this.handleCrumble(nx + dx, ny + dy);
-        }
-      }
+      ps.lastSafeX = slot.tileX;
+      ps.lastSafeY = slot.tileY;
+      slot.tileX = nx;
+      slot.tileY = ny;
 
-      if (holes >= HOLE_THRESHOLD) {
+      const t = this.terrainAtMut(nx, ny);
+      if (t === Terrain.Hole) {
         if (ps.shieldActive) { ps.shieldActive = false; this.broadcast('shieldUsed', { sessionId }); }
         else { this.handleHole(sessionId, slot, ps); return; }
       }
-      if (!slideFound) break;
+      if (t === Terrain.Crumble) this.handleCrumble(nx, ny);
+      if (t !== Terrain.Slide) break; // stop sliding when leaving ice
     }
 
-    let hasSlow = false;
-    for (let dy = 0; dy < FOOTPRINT; dy++) {
-      for (let dx = 0; dx < FOOTPRINT; dx++) {
-        if (this.terrainAtMut(slot.tileX + dx, slot.tileY + dy) === Terrain.Slow) hasSlow = true;
-      }
-    }
-    if (hasSlow) ps.currentCooldown = SLOW_COOLDOWN;
+    // Apply terrain effect at final landing position
+    const finalT = this.terrainAtMut(slot.tileX, slot.tileY);
+    if (finalT === Terrain.Slow) ps.currentCooldown = SLOW_COOLDOWN;
   }
 
   private handleCrumble(tileX: number, tileY: number): void {
@@ -551,22 +636,17 @@ export class RaceRoom extends Room<RaceState> {
     this.crumbleTimers.set(key, setTimeout(() => {
       this.terrainGrid[tileY][tileX] = Terrain.Hole;
       this.crumbleTimers.delete(key);
+
+      // Check if any player is standing on this tile
       for (const slot of this.state.slots) {
-        if (!slot.occupied) continue;
-        let holes = 0;
-        for (let dy = 0; dy < FOOTPRINT; dy++) {
-          for (let dx = 0; dx < FOOTPRINT; dx++) {
-            if (this.terrainAtMut(slot.tileX + dx, slot.tileY + dy) === Terrain.Hole) holes++;
-          }
-        }
-        if (holes >= HOLE_THRESHOLD) {
-          const ps = this.players.get(slot.sessionId);
-          if (ps && !ps.frozen) {
-            if (ps.shieldActive) { ps.shieldActive = false; this.broadcast('shieldUsed', { sessionId: slot.sessionId }); }
-            else this.handleHole(slot.sessionId, slot, ps);
-          }
+        if (!slot.occupied || slot.tileX !== tileX || slot.tileY !== tileY) continue;
+        const ps = this.players.get(slot.sessionId);
+        if (ps && !ps.frozen) {
+          if (ps.shieldActive) { ps.shieldActive = false; this.broadcast('shieldUsed', { sessionId: slot.sessionId }); }
+          else this.handleHole(slot.sessionId, slot, ps);
         }
       }
+
       this.broadcast('terrainChange', { tileX, tileY, terrain: Terrain.Hole });
       this.broadcastState();
     }, CRUMBLE_DELAY_MS));
@@ -580,10 +660,8 @@ export class RaceRoom extends Room<RaceState> {
     for (const pickup of this.pickups) {
       if (this.collectedPickups.has(pickup.id)) continue;
 
-      // Check 2×2 footprint overlap with pickup tile
-      const overlapX = slot.tileX <= pickup.x && slot.tileX + FOOTPRINT > pickup.x;
-      const overlapY = slot.tileY <= pickup.y && slot.tileY + FOOTPRINT > pickup.y;
-      if (!overlapX || !overlapY) continue;
+      // Single tile overlap
+      if (slot.tileX !== pickup.x || slot.tileY !== pickup.y) continue;
 
       // Collect it
       ps.heldPickup = pickup.type;
@@ -682,7 +760,7 @@ export class RaceRoom extends Room<RaceState> {
       for (let s = 0; s < steps; s++) {
         const nx = Math.max(0, Math.min(MOVE_MAX_X, finalX + stepDx));
         const ny = Math.max(0, Math.min(MOVE_MAX_Y, finalY + stepDy));
-        if (this.footprintHasWall(nx, ny)) break;
+        if (this.isWall(nx, ny)) break;
         finalX = nx;
         finalY = ny;
       }
@@ -707,9 +785,9 @@ export class RaceRoom extends Room<RaceState> {
     for (const zone of this.slimeZones) {
       if (zone.ownerId === sessionId) continue; // don't get stuck by own slime
 
-      // Check if footprint overlaps slime zone
-      const overlapX = slot.tileX < zone.x + SLIME_SIZE && slot.tileX + FOOTPRINT > zone.x;
-      const overlapY = slot.tileY < zone.y + SLIME_SIZE && slot.tileY + FOOTPRINT > zone.y;
+      // Check if player tile is within slime zone
+      const overlapX = slot.tileX >= zone.x && slot.tileX < zone.x + SLIME_SIZE;
+      const overlapY = slot.tileY >= zone.y && slot.tileY < zone.y + SLIME_SIZE;
 
       if (overlapX && overlapY) {
         if (ps.shieldActive) {
@@ -729,8 +807,9 @@ export class RaceRoom extends Room<RaceState> {
   private tryActivateButton(sessionId: string, px: number, py: number): void {
     const now = Date.now();
     for (const btn of this.buttons) {
-      const overlapX = px < btn.x + 2 && px + FOOTPRINT > btn.x;
-      const overlapY = py < btn.y + 2 && py + FOOTPRINT > btn.y;
+      // Player tile within the button's 2×2 area
+      const overlapX = px >= btn.x && px < btn.x + 2;
+      const overlapY = py >= btn.y && py < btn.y + 2;
       if (!overlapX || !overlapY) continue;
       if ((this.buttonCooldowns.get(btn.id) ?? 0) > now) continue;
       if (this.activeEffects.has(btn.id)) continue;
@@ -775,13 +854,7 @@ export class RaceRoom extends Room<RaceState> {
     if (fillTerrain === Terrain.Hole) {
       for (const slot of this.state.slots) {
         if (!slot.occupied) continue;
-        let holes = 0;
-        for (let fdy = 0; fdy < FOOTPRINT; fdy++) {
-          for (let fdx = 0; fdx < FOOTPRINT; fdx++) {
-            if (this.terrainAtMut(slot.tileX + fdx, slot.tileY + fdy) === Terrain.Hole) holes++;
-          }
-        }
-        if (holes >= HOLE_THRESHOLD) {
+        if (this.terrainAtMut(slot.tileX, slot.tileY) === Terrain.Hole) {
           const pps = this.players.get(slot.sessionId);
           if (pps && !pps.frozen) this.handleHole(slot.sessionId, slot, pps);
         }
@@ -803,11 +876,8 @@ export class RaceRoom extends Room<RaceState> {
 
   // ─── Helpers ───────────────────────────────────────────────────────────
 
-  private footprintHasWall(x: number, y: number): boolean {
-    for (let dy = 0; dy < FOOTPRINT; dy++)
-      for (let dx = 0; dx < FOOTPRINT; dx++)
-        if (this.terrainAtMut(x + dx, y + dy) === Terrain.Wall) return true;
-    return false;
+  private isWall(x: number, y: number): boolean {
+    return this.terrainAtMut(x, y) === Terrain.Wall;
   }
 
   private terrainAtMut(tileX: number, tileY: number): number {
@@ -824,14 +894,8 @@ export class RaceRoom extends Room<RaceState> {
     if (ps.knockbackSlowTimer) clearTimeout(ps.knockbackSlowTimer);
   }
 
-  private dominantTerrain(tileX: number, tileY: number): number {
-    const counts = [0, 0, 0, 0, 0, 0, 0, 0];
-    for (let dy = 0; dy < FOOTPRINT; dy++)
-      for (let dx = 0; dx < FOOTPRINT; dx++)
-        counts[this.terrainAtMut(tileX + dx, tileY + dy)]++;
-    const priority = [Terrain.Hole, Terrain.Slide, Terrain.Crumble, Terrain.Slow, Terrain.Normal];
-    for (const t of priority) if (counts[t] > 0) return t;
-    return Terrain.Normal;
+  private terrainAtPlayer(tileX: number, tileY: number): number {
+    return this.terrainAtMut(tileX, tileY);
   }
 
   // ─── State broadcast ──────────────────────────────────────────────────
@@ -855,12 +919,14 @@ export class RaceRoom extends Room<RaceState> {
           penalized: ps?.penalized ?? false,
           boosted: false, // boost terrain removed
           finished: ps?.finished ?? false,
-          currentTerrain: s.occupied ? this.dominantTerrain(s.tileX, s.tileY) : Terrain.Normal,
+          currentTerrain: s.occupied ? this.terrainAtPlayer(s.tileX, s.tileY) : Terrain.Normal,
           heldPickup: ps?.heldPickup ?? null,
           shieldActive: ps?.shieldActive ?? false,
           speedBoosted: ps ? ps.speedBoostUntil > now : false,
           stuck: ps ? ps.stuckUntil > now : false,
           knockbackSlowed: ps ? ps.knockbackSlowUntil > now : false,
+          stamina: ps?.stamina ?? STAMINA_MAX,
+          sprinting: ps?.sprinting ?? false,
         };
       }),
     });

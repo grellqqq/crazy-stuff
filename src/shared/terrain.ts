@@ -88,6 +88,19 @@ export const KNOCKBACK_SLOW_MS = 3000;
 /** Knockback: slow cooldown (ms). */
 export const KNOCKBACK_SLOW_CD = 400;
 
+// ─── Sprint & stamina ────────────────────────────────────────────────────────
+
+export const SPRINT_COOLDOWN      = 80;   // ms between moves while sprinting
+export const STAMINA_MAX          = 100;
+export const STAMINA_DRAIN        = 8;    // per sprint move
+export const STAMINA_REGEN_RATE   = 20;   // per second when not sprinting
+export const STAMINA_MIN_TO_SPRINT = 10;  // minimum stamina to start/continue sprinting
+
+// ─── Jump ────────────────────────────────────────────────────────────────────
+
+export const JUMP_DISTANCE        = 3;    // tiles to leap forward
+export const JUMP_COOLDOWN_MS     = 1500; // ms between jumps
+
 export const PICKUP_NAMES: Record<number, string> = {
   [PickupType.SpeedBoost]: 'SPEED',
   [PickupType.Shield]:     'SHIELD',
@@ -102,8 +115,8 @@ export const GRID_ROWS    = 30;
 export const GRID_COL_MAX = 89;
 export const GRID_ROW_MAX = 29;
 
-export const FOOTPRINT = 2;
-export const HOLE_THRESHOLD = 3;
+/** Player occupies a single tile. */
+export const FOOTPRINT = 1;
 
 // ─── Spawn & finish ──────────────────────────────────────────────────────────
 
@@ -309,7 +322,7 @@ export function generateTerrainMap(): number[][] {
   placeWallSegments(map, 72, 78, tTop, tBot, 3);
 
   // Safety clears
-  clearRect(map, 0, 6, SPAWN_Y - 2, SPAWN_Y + FOOTPRINT + 1);
+  clearRect(map, 0, 6, SPAWN_Y - 2, SPAWN_Y + 2);
   clearRect(map, FINISH_X, GRID_COL_MAX, FINISH_Y_MIN, FINISH_Y_MAX);
 
   ensurePassable(map, tTop, tBot);
