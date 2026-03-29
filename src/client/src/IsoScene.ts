@@ -152,6 +152,10 @@ export class IsoScene extends Phaser.Scene {
   private localTerrain: number[][] = [];
   private tileGfx!: Phaser.GameObjects.Graphics;
   private finishGfx!: Phaser.GameObjects.Graphics;
+  /** Tile sprite images — 2D array [ty][tx] for texture-based rendering. */
+  private tileImages: (Phaser.GameObjects.Image | null)[][] = [];
+  /** Processed tile texture keys per terrain type. */
+  private tileTextureReady = false;
 
   // ─── Race phase HUD ─────────────────────────────────────────────────────
   private currentPhase: number = RacePhase.Waiting;
@@ -197,6 +201,9 @@ export class IsoScene extends Phaser.Scene {
   private inertiaRemaining = 0;
   private inertiaDir: 'W' | 'A' | 'S' | 'D' | null = null;
 
+  // ─── Particles & Sound ──────────────────────────────────────────────────
+  private audioCtx: AudioContext | null = null;
+
   constructor() {
     super({ key: 'IsoScene' });
   }
@@ -204,17 +211,26 @@ export class IsoScene extends Phaser.Scene {
   // ─── Preload ───────────────────────────────────────────────────────────
 
   preload(): void {
-    // Space suit: single 3×4 spritesheet, 80×80 per frame
-    this.load.spritesheet('spacesuit', '/sprites/space_suit.png', {
-      frameWidth: 80,
-      frameHeight: 80,
-    });
-
-    // Knight: separate spritesheet per direction, 3×3 grid, 512×512 per frame
+    // Character sprites
+    this.load.spritesheet('spacesuit', '/sprites/space_suit.png', { frameWidth: 80, frameHeight: 80 });
     this.load.spritesheet('knight_S', '/sprites/knight/walk_dir1.png', { frameWidth: 512, frameHeight: 512 });
     this.load.spritesheet('knight_A', '/sprites/knight/walk_dir3.png', { frameWidth: 512, frameHeight: 512 });
     this.load.spritesheet('knight_W', '/sprites/knight/walk_dir5.png', { frameWidth: 512, frameHeight: 512 });
     this.load.spritesheet('knight_D', '/sprites/knight/walk_dir7.png', { frameWidth: 512, frameHeight: 512 });
+
+    // Tile textures (SBS 128×64 isometric tiles, 3×6 grid per sheet)
+    this.load.image('tiles_grass', '/tiles/grass.png');
+    this.load.image('tiles_dry', '/tiles/dry.png');
+    this.load.image('tiles_ice', '/tiles/ice.png');
+    this.load.image('tiles_rocky', '/tiles/rocky.png');
+    this.load.image('tiles_elements', '/tiles/elements.png');
+    this.load.image('tiles_stones', '/tiles/stones.png');
+    this.load.image('tiles_metal', '/tiles/metal.png');
+
+    // Object sprites
+    this.load.image('wall_block', '/sprites/wall_block.png');
+    this.load.image('button_critter', '/sprites/button_critter.png');
+    this.load.spritesheet('crate_wood', '/sprites/crates_wood.png', { frameWidth: 128, frameHeight: 128 });
   }
 
   // ─── Create ────────────────────────────────────────────────────────────
@@ -252,6 +268,21 @@ export class IsoScene extends Phaser.Scene {
           });
         }
       }
+    }
+
+    // Generate a simple circle particle texture
+    const particleGfx = this.make.graphics({ x: 0, y: 0 });
+    particleGfx.fillStyle(0xffffff, 1);
+    particleGfx.fillCircle(4, 4, 4);
+    particleGfx.generateTexture('particle', 8, 8);
+    particleGfx.destroy();
+
+    // Process tile textures: remove magenta background → transparent, create spritesheets
+    try {
+      this.processTileTextures();
+    } catch (e) {
+      console.error('[IsoScene] tile texture processing failed, using fallback colors:', e);
+      this.tileTextureReady = false;
     }
 
     const topLeft = tileToScreen(0, GRID_ROWS - 1);
@@ -334,6 +365,7 @@ export class IsoScene extends Phaser.Scene {
     }
 
     this.renderCrumbleWarnings(_time);
+    this.renderPickupGlow(_time);
     this.updateMinimapPlayers();
 
     // Key-hold auto-repeat + inertia
@@ -389,28 +421,216 @@ export class IsoScene extends Phaser.Scene {
 
   private renderAllTiles(): void {
     this.tileGfx.clear();
+
+    // Destroy old tile images
+    for (const row of this.tileImages) {
+      if (!row) continue;
+      for (const img of row) if (img) img.destroy();
+    }
+    this.tileImages = [];
+
     for (let ty = 0; ty < GRID_ROWS; ty++) {
+      this.tileImages[ty] = [];
       for (let tx = 0; tx < GRID_COLS; tx++) {
-        this.renderTile(tx, ty);
+        this.tileImages[ty][tx] = this.renderTile(tx, ty);
       }
     }
   }
 
-  private renderTile(tx: number, ty: number): void {
-    const terrain = this.localTerrain[ty]?.[tx] ?? Terrain.Normal;
-    const [colorA, colorB] = TERRAIN_COLORS[terrain];
-    const fill = (tx + ty) % 2 === 0 ? colorA : colorB;
+  /**
+   * Terrain type → tile texture key + frame index.
+   * Frame index picks a variant from the 3×6 grid (18 variants per sheet).
+   */
+  private readonly TERRAIN_TILE_MAP: Record<number, { src: string; key: string; frames: number[] }> = {
+    [Terrain.Normal]:  { src: 'tiles_stones',   key: 'tf_stones',   frames: [0] },
+    [Terrain.Slow]:    { src: 'tiles_dry',      key: 'tf_dry',      frames: [0] },
+    [Terrain.Slide]:   { src: 'tiles_ice',      key: 'tf_ice',      frames: [0] },
+    [Terrain.Crumble]: { src: 'tiles_rocky',    key: 'tf_rocky',    frames: [0] },
+    [Terrain.Boost]:   { src: 'tiles_stones',   key: 'tf_stones',   frames: [0] },
+  };
 
+  /** Remove magenta (#FF00FF) background from tile textures and create spritesheets. */
+  private processTileTextures(): void {
+    const tileW = 128;
+    const tileH = 64;
+    const processed = new Set<string>();
+
+    for (const terrainDef of Object.values(this.TERRAIN_TILE_MAP)) {
+      // Skip if we already processed this key (e.g. Boost shares grass)
+      if (processed.has(terrainDef.key)) continue;
+      processed.add(terrainDef.key);
+
+      const srcTexture = this.textures.get(terrainDef.src);
+      const srcImage = srcTexture.getSourceImage() as HTMLImageElement;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = srcImage.width;
+      canvas.height = srcImage.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(srcImage, 0, 0);
+
+      // Replace magenta pixels with transparent
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] >= 240 && data[i + 1] <= 15 && data[i + 2] >= 240) {
+          data[i + 3] = 0;
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      // Add as a new canvas texture, then create spritesheet frames
+      const canvasTexture = this.textures.addCanvas(terrainDef.key, canvas)!;
+      const cols = Math.floor(canvas.width / tileW);
+      const rows = Math.floor(canvas.height / tileH);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const frameIdx = r * cols + c;
+          canvasTexture.add(frameIdx, 0, c * tileW, r * tileH, tileW, tileH);
+        }
+      }
+    }
+
+    // Also process crate texture — remove black background
+    try {
+      const crateSrc = this.textures.get('crate_wood').getSourceImage() as HTMLImageElement;
+      const crateCanvas = document.createElement('canvas');
+      crateCanvas.width = crateSrc.width;
+      crateCanvas.height = crateSrc.height;
+      const crateCtx = crateCanvas.getContext('2d', { willReadFrequently: true })!;
+      crateCtx.drawImage(crateSrc, 0, 0);
+      const crateData = crateCtx.getImageData(0, 0, crateCanvas.width, crateCanvas.height);
+      const cd = crateData.data;
+      for (let i = 0; i < cd.length; i += 4) {
+        if (cd[i] <= 10 && cd[i + 1] <= 10 && cd[i + 2] <= 10) {
+          cd[i + 3] = 0;
+        }
+      }
+      crateCtx.putImageData(crateData, 0, 0);
+      this.textures.remove('crate_wood');
+      const crateTex = this.textures.addCanvas('crate_wood', crateCanvas)!;
+      // Add 128×128 frames (6 cols × 4 rows)
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 6; c++) {
+          crateTex.add(r * 6 + c, 0, c * 128, r * 128, 128, 128);
+        }
+      }
+    } catch (e) {
+      console.warn('Crate texture processing failed:', e);
+    }
+
+    this.tileTextureReady = true;
+  }
+
+  private renderTile(tx: number, ty: number): Phaser.GameObjects.Image | null {
+    const terrain = this.localTerrain[ty]?.[tx] ?? Terrain.Normal;
     const { x, y } = tileToScreen(tx, ty);
     const sx = this.originX + x;
     const sy = this.originY + y;
-    const pts = this.rhombusPoints(sx, sy);
+    const tileDepth = isoDepth(tx, ty);
 
+    // Hole: Graphics-drawn dark void with depth rim (no texture)
+    if (terrain === Terrain.Hole) {
+      const pts = this.rhombusPoints(sx, sy);
+      this.tileGfx.fillStyle(0x0c1018, 1);
+      this.tileGfx.fillPoints(pts, true);
+      this.tileGfx.lineStyle(3, 0x000000, 0.8);
+      this.tileGfx.strokePoints(pts, true);
+      this.tileGfx.lineStyle(2, 0x445566, 0.6);
+      this.tileGfx.beginPath();
+      this.tileGfx.moveTo(pts[3].x + 6, pts[3].y);
+      this.tileGfx.lineTo(pts[0].x, pts[0].y + 4);
+      this.tileGfx.lineTo(pts[1].x - 6, pts[1].y);
+      this.tileGfx.strokePath();
+      return null;
+    }
+
+    // Wall: 3D block sprite instead of flat tile
+    if (terrain === Terrain.Wall) {
+      const wallImg = this.add.image(sx, sy + TILE_H / 2, 'wall_block');
+      wallImg.setScale(2.0); // 32×32 → 64×64
+      wallImg.setDepth(tileDepth);
+      // Also draw the side extrusion
+      this.drawWallBlock(sx, sy);
+      return wallImg;
+    }
+
+    // Button: bonfire sprite on top of a stone ground tile
+    if (terrain === Terrain.Button) {
+      // Stone floor underneath
+      if (this.tileTextureReady && this.TERRAIN_TILE_MAP[Terrain.Normal]) {
+        const stoneDef = this.TERRAIN_TILE_MAP[Terrain.Normal];
+        const stoneImg = this.add.image(sx, sy + TILE_H / 2, stoneDef.key, stoneDef.frames[0]);
+        stoneImg.setScale(0.5);
+        stoneImg.setDepth(-1);
+      }
+      // Boar critter as button marker — 46×32 native, ~40% of spacesuit size
+      const btnImg = this.add.image(sx, sy + TILE_H / 2, 'button_critter');
+      btnImg.setScale(1.17);
+      btnImg.setDepth(tileDepth + 0.1);
+      return btnImg;
+    }
+
+    // Textured floor tile
+    if (this.tileTextureReady) {
+      const tileDef = this.TERRAIN_TILE_MAP[terrain] ?? this.TERRAIN_TILE_MAP[Terrain.Normal];
+      if (tileDef) {
+        const frameIdx = tileDef.frames[(tx + ty * 3) % tileDef.frames.length];
+        const img = this.add.image(sx, sy + TILE_H / 2, tileDef.key, frameIdx);
+        img.setScale(0.5);
+        img.setDepth(-1);
+        return img;
+      }
+    }
+
+    // Fallback: flat colored diamond
+    const [colorA, colorB] = TERRAIN_COLORS[terrain] ?? TERRAIN_COLORS[0];
+    const fill = (tx + ty) % 2 === 0 ? colorA : colorB;
+    const pts = this.rhombusPoints(sx, sy);
     this.tileGfx.fillStyle(fill, 1);
     this.tileGfx.fillPoints(pts, true);
+    return null;
+  }
 
-    this.tileGfx.lineStyle(1, TILE_OUTLINE, 0.1);
-    this.tileGfx.strokePoints(pts, true);
+  /** Draw extruded side faces below a wall tile to create a 3D block effect. */
+  private drawWallBlock(sx: number, sy: number): void {
+    const wallH = 20; // pixel height of the wall extrusion
+
+    // Right face (darker)
+    this.tileGfx.fillStyle(0x2a2a3a, 1);
+    this.tileGfx.beginPath();
+    this.tileGfx.moveTo(sx, sy + TILE_H);
+    this.tileGfx.lineTo(sx + TILE_W / 2, sy + TILE_H / 2);
+    this.tileGfx.lineTo(sx + TILE_W / 2, sy + TILE_H / 2 + wallH);
+    this.tileGfx.lineTo(sx, sy + TILE_H + wallH);
+    this.tileGfx.closePath();
+    this.tileGfx.fillPath();
+
+    // Right face edge
+    this.tileGfx.lineStyle(1, 0x000000, 0.5);
+    this.tileGfx.strokePath();
+
+    // Left face (slightly lighter)
+    this.tileGfx.fillStyle(0x3a3a4e, 1);
+    this.tileGfx.beginPath();
+    this.tileGfx.moveTo(sx, sy + TILE_H);
+    this.tileGfx.lineTo(sx - TILE_W / 2, sy + TILE_H / 2);
+    this.tileGfx.lineTo(sx - TILE_W / 2, sy + TILE_H / 2 + wallH);
+    this.tileGfx.lineTo(sx, sy + TILE_H + wallH);
+    this.tileGfx.closePath();
+    this.tileGfx.fillPath();
+
+    // Left face edge
+    this.tileGfx.lineStyle(1, 0x000000, 0.5);
+    this.tileGfx.strokePath();
+
+    // Top face bright highlight
+    this.tileGfx.lineStyle(2, 0x888899, 0.6);
+    this.tileGfx.beginPath();
+    this.tileGfx.moveTo(sx - TILE_W / 2, sy + TILE_H / 2);
+    this.tileGfx.lineTo(sx, sy);
+    this.tileGfx.lineTo(sx + TILE_W / 2, sy + TILE_H / 2);
+    this.tileGfx.strokePath();
   }
 
   private drawFinishLine(): void {
@@ -589,7 +809,14 @@ export class IsoScene extends Phaser.Scene {
       av.tileY = newY;
       if (isNew) { av.displayX = av.tileX; av.displayY = av.tileY; }
       av.playerName = slot.playerName ?? '';
-      av.frozen = slot.frozen ?? false;
+
+      // Detect hole fall (frozen transition) for sound/particles
+      const newFrozen = slot.frozen ?? false;
+      if (newFrozen && !av.frozen && slot.sessionId === this.mySessionId) {
+        this.sfxHoleFall();
+        this.emitAtPlayer(0xff2222, 15);
+      }
+      av.frozen = newFrozen;
       av.penalized = slot.penalized ?? false;
       av.currentTerrain = slot.currentTerrain ?? Terrain.Normal;
       av.heldPickup = slot.heldPickup ?? null;
@@ -741,16 +968,58 @@ export class IsoScene extends Phaser.Scene {
     0: 0x44ff44, 1: 0x44ffff, 2: 0xaaff00, 3: 0xff6644,
   };
 
-  private renderPickups(): void {
+  private pickupSprites: Phaser.GameObjects.Image[] = [];
+
+  /** Render a pulsing glow under each uncollected pickup. */
+  private renderPickupGlow(time: number): void {
     this.pickupGfx.clear();
+    const pulse = 0.25 + Math.sin(time / 300) * 0.15; // alpha oscillates 0.10–0.40
+
     for (const p of this.pickups) {
       if (this.collectedPickupIds.has(p.id)) continue;
       const { x, y } = tileToScreen(p.x, p.y);
-      const pts = this.rhombusPoints(this.originX + x, this.originY + y);
-      this.pickupGfx.fillStyle(this.PICKUP_COLORS[p.type] ?? 0xffffff, 0.7);
-      this.pickupGfx.fillPoints(pts, true);
-      this.pickupGfx.lineStyle(2, 0xffffff, 0.8);
-      this.pickupGfx.strokePoints(pts, true);
+      const sx = this.originX + x;
+      const sy = this.originY + y + TILE_H / 2;
+      const color = this.PICKUP_COLORS[p.type] ?? 0xffffff;
+
+      this.pickupGfx.fillStyle(color, pulse);
+      this.pickupGfx.fillEllipse(sx, sy, 28, 14);
+    }
+  }
+
+  private renderPickups(): void {
+    for (const s of this.pickupSprites) s.destroy();
+    this.pickupSprites = [];
+    this.pickupGfx.clear();
+
+    const PICKUP_CRATE: Record<number, { frame: number; tint: number }> = {
+      0: { frame: 0, tint: 0x44ff44 },  // Speed — green
+      1: { frame: 6, tint: 0x44ffff },  // Shield — cyan
+      2: { frame: 12, tint: 0xaaff00 }, // Slime — lime
+      3: { frame: 18, tint: 0xff6644 }, // Knockback — red
+    };
+
+    for (const p of this.pickups) {
+      if (this.collectedPickupIds.has(p.id)) continue;
+      const { x, y } = tileToScreen(p.x, p.y);
+      const sx = this.originX + x;
+      const sy = this.originY + y;
+      const cfg = PICKUP_CRATE[p.type] ?? { frame: 0, tint: 0xffffff };
+      const crate = this.add.image(sx, sy, 'crate_wood', cfg.frame);
+      crate.setScale(0.36);
+      crate.setTint(cfg.tint);
+      crate.setDepth(isoDepth(p.x, p.y) + 0.05);
+      this.pickupSprites.push(crate);
+
+      // Gentle floating bob animation
+      this.tweens.add({
+        targets: crate,
+        y: sy - 4,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
     }
   }
 
@@ -827,6 +1096,10 @@ export class IsoScene extends Phaser.Scene {
       this.currentPhase = data.phase;
       if (data.phase === RacePhase.Racing && prevPhase !== RacePhase.Racing) {
         this.raceStartTime = data.startTime;
+        this.sfxRaceStart();
+      }
+      if (data.phase === RacePhase.Countdown && data.countdown > 0 && data.countdown <= 3) {
+        this.sfxCountdownBeep();
       }
       if (data.phase === RacePhase.Waiting && prevPhase === RacePhase.Finished) {
         this.handleRaceReset();
@@ -856,6 +1129,7 @@ export class IsoScene extends Phaser.Scene {
 
     room.onMessage('playerFinished', (data: { playerName: string; position: number; timeSeconds: number }) => {
       this.showAnnouncement(`#${data.position} ${data.playerName} finished in ${data.timeSeconds.toFixed(2)}s!`);
+      this.sfxFinish();
     });
 
     room.onMessage('raceResults', (data: { results: RaceResult[] }) => {
@@ -864,27 +1138,56 @@ export class IsoScene extends Phaser.Scene {
 
     room.onMessage('crumbleWarning', (data: { tileX: number; tileY: number }) => {
       this.crumbleWarnings.set(`${data.tileX},${data.tileY}`, performance.now());
+      this.sfxCrumble();
+      this.emitAtTile(data.tileX, data.tileY, 0xc4824a, 6);
     });
 
-    room.onMessage('pickupCollected', (data: { id: number }) => {
+    room.onMessage('pickupCollected', (data: { id: number; sessionId: string }) => {
       this.collectedPickupIds.add(data.id);
       this.renderPickups();
+      if (data.sessionId === this.mySessionId) {
+        this.sfxPickupCollect();
+        this.emitAtPlayer(0x44ff44, 8);
+      }
     });
 
     room.onMessage('slimePlaced', (data: { x: number; y: number; size: number }) => {
       this.slimeZones.push({ x: data.x, y: data.y, size: data.size });
       this.renderSlimeZones();
+      this.sfxSlime();
+      this.emitAtTile(data.x + 1, data.y + 1, 0xaaff00, 15);
     });
     room.onMessage('slimeExpired', (data: { x: number; y: number }) => {
       this.slimeZones = this.slimeZones.filter(z => z.x !== data.x || z.y !== data.y);
       this.renderSlimeZones();
     });
 
-    room.onMessage('pickupUsed', () => {});
-    room.onMessage('shieldUsed', () => {});
-    room.onMessage('playerStuck', () => {});
-    room.onMessage('playerJumped', () => {});
-    room.onMessage('buttonActivated', () => {});
+    room.onMessage('pickupUsed', (data: { sessionId: string; type: number }) => {
+      if (data.sessionId === this.mySessionId) {
+        this.sfxPickupUse();
+        this.emitAtPlayer(0xffd700, 10);
+      }
+    });
+    room.onMessage('shieldUsed', (data: { sessionId: string }) => {
+      if (data.sessionId === this.mySessionId) {
+        this.playTone(300, 0.15, 'sine', 0.1);
+        this.emitAtPlayer(0x44ffff, 15);
+      }
+    });
+    room.onMessage('playerStuck', (data: { sessionId: string }) => {
+      if (data.sessionId === this.mySessionId) {
+        this.sfxSlime();
+        this.emitAtPlayer(0xaaff00, 8);
+      }
+    });
+    room.onMessage('playerJumped', (data: { sessionId: string }) => {
+      if (data.sessionId === this.mySessionId) this.sfxJump();
+    });
+    room.onMessage('buttonActivated', (data: { id: number }) => {
+      this.sfxButtonPress();
+      const btn = this.buttons.find(b => b.id === data.id);
+      if (btn) this.emitAtTile(btn.x, btn.y, 0xdd3388, 12);
+    });
     room.onMessage('buttonReverted', () => {});
 
     console.log('[IsoScene] connected to RaceRoom:', this.mySessionId);
@@ -987,6 +1290,93 @@ export class IsoScene extends Phaser.Scene {
     }
     this.resultsText.setText(lines.join('\n')).setVisible(true);
   }
+
+  // ─── Particles ─────────────────────────────────────────────────────────
+
+  /** Emit a burst of colored particles at a world position. */
+  private emitParticles(wx: number, wy: number, color: number, count = 10, speed = 60): void {
+    const emitter = this.add.particles(wx, wy, 'particle', {
+      speed: { min: speed / 2, max: speed },
+      scale: { start: 0.8, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: 400,
+      tint: color,
+      quantity: count,
+      emitting: false,
+    });
+    emitter.setDepth(10000);
+    emitter.explode(count);
+    this.time.delayedCall(600, () => emitter.destroy());
+  }
+
+  /** Emit particles at a tile position. */
+  private emitAtTile(tx: number, ty: number, color: number, count = 10): void {
+    const { x, y } = tileToScreen(tx, ty);
+    this.emitParticles(this.originX + x, this.originY + y + TILE_H / 2, color, count);
+  }
+
+  /** Emit particles at the local player's position. */
+  private emitAtPlayer(color: number, count = 12): void {
+    const av = this.avatars.get(this.mySlotIndex);
+    if (!av) return;
+    const { x, y } = tileToScreen(av.displayX, av.displayY);
+    this.emitParticles(this.originX + x, this.originY + y + TILE_H / 2, color, count);
+  }
+
+  // ─── Sound (Web Audio API) ────────────────────────────────────────────
+
+  private getAudioCtx(): AudioContext {
+    if (!this.audioCtx) this.audioCtx = new AudioContext();
+    return this.audioCtx;
+  }
+
+  /** Play a simple tone. */
+  private playTone(freq: number, duration: number, type: OscillatorType = 'square', volume = 0.1): void {
+    try {
+      const ctx = this.getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch { /* ignore audio errors */ }
+  }
+
+  /** Play a noise burst (for impacts, crumble). */
+  private playNoise(duration: number, volume = 0.08): void {
+    try {
+      const ctx = this.getAudioCtx();
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start();
+    } catch { /* ignore */ }
+  }
+
+  private sfxPickupCollect(): void   { this.playTone(880, 0.1, 'sine', 0.12); this.playTone(1100, 0.1, 'sine', 0.08); }
+  private sfxPickupUse(): void       { this.playTone(660, 0.15, 'square', 0.08); this.playTone(880, 0.12, 'square', 0.06); }
+  private sfxHoleFall(): void        { this.playTone(200, 0.3, 'sawtooth', 0.1); this.playTone(100, 0.4, 'sawtooth', 0.08); }
+  private sfxButtonPress(): void     { this.playTone(440, 0.08, 'square', 0.1); this.playTone(550, 0.08, 'square', 0.08); }
+  private sfxCountdownBeep(): void   { this.playTone(600, 0.15, 'sine', 0.12); }
+  private sfxRaceStart(): void       { this.playTone(800, 0.1, 'sine', 0.15); this.playTone(1000, 0.15, 'sine', 0.12); this.playTone(1200, 0.2, 'sine', 0.1); }
+  private sfxFinish(): void          { this.playTone(523, 0.15, 'sine', 0.12); this.playTone(659, 0.15, 'sine', 0.1); this.playTone(784, 0.2, 'sine', 0.12); this.playTone(1047, 0.3, 'sine', 0.1); }
+  private sfxCrumble(): void         { this.playNoise(0.2, 0.06); }
+  private sfxJump(): void            { this.playTone(300, 0.05, 'sine', 0.08); this.playTone(500, 0.1, 'sine', 0.06); }
+  private sfxSlime(): void           { this.playTone(150, 0.2, 'sawtooth', 0.06); }
+  private sfxKnockback(): void       { this.playNoise(0.15, 0.1); this.playTone(200, 0.1, 'square', 0.08); }
 
   // ─── Geometry ──────────────────────────────────────────────────────────
 

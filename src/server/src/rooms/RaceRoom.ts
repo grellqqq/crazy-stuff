@@ -807,9 +807,9 @@ export class RaceRoom extends Room<RaceState> {
   private tryActivateButton(sessionId: string, px: number, py: number): void {
     const now = Date.now();
     for (const btn of this.buttons) {
-      // Player tile within the button's 2×2 area
-      const overlapX = px >= btn.x && px < btn.x + 2;
-      const overlapY = py >= btn.y && py < btn.y + 2;
+      // Player tile matches button tile
+      const overlapX = px === btn.x;
+      const overlapY = py === btn.y;
       if (!overlapX || !overlapY) continue;
       if ((this.buttonCooldowns.get(btn.id) ?? 0) > now) continue;
       if (this.activeEffects.has(btn.id)) continue;

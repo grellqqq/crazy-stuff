@@ -360,25 +360,19 @@ export function generateButtons(map: number[][]): ButtonDef[] {
 
     let placed = false;
     for (let attempt = 0; attempt < 30 && !placed; attempt++) {
-      const bx = randomInt(slot.xMin, slot.xMax - 1);
+      const bx = randomInt(slot.xMin, slot.xMax);
       const by = randomInt(tTop + 2, tBot - 2);
 
-      let canPlace = true;
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dx = 0; dx <= 1; dx++) {
-          const t = map[by + dy]?.[bx + dx];
-          if (t === Terrain.Wall || t === Terrain.Hole || t === Terrain.Button) canPlace = false;
-        }
-      }
-      if (!canPlace) continue;
+      // Single tile check
+      const existing = map[by]?.[bx];
+      if (existing === Terrain.Wall || existing === Terrain.Hole || existing === Terrain.Button) continue;
 
       const tx = bx + slot.targetAhead;
       const ty = by - Math.floor(target.h / 2);
       if (tx + target.w > GRID_COL_MAX || ty < tTop || ty + target.h > tBot) continue;
 
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dx = 0; dx <= 1; dx++) map[by + dy][bx + dx] = Terrain.Button;
-      }
+      // Place as single tile
+      map[by][bx] = Terrain.Button;
 
       buttons.push({
         id: buttons.length, type,
@@ -425,8 +419,17 @@ export function generatePickups(map: number[][]): PickupDef[] {
         const x = randomInt(zone.xMin, zone.xMax);
         const y = randomInt(tTop + 1, tBot - 1);
 
-        // Must be on Normal terrain and not overlap another pickup
+        // Must be on Normal terrain, not adjacent to walls, and not overlap another pickup
         if (map[y][x] !== Terrain.Normal) continue;
+        // Check wider area for walls/buttons (avoid visual overlap with 3D objects)
+        let nearBlocking = false;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const t = map[y + dy]?.[x + dx] ?? 0;
+            if (t === Terrain.Wall || t === Terrain.Button) nearBlocking = true;
+          }
+        }
+        if (nearBlocking) continue;
         if (pickups.some(p => Math.abs(p.x - x) < 3 && Math.abs(p.y - y) < 3)) continue;
 
         pickups.push({
