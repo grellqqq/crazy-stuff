@@ -1074,7 +1074,14 @@ export class IsoScene extends Phaser.Scene {
     const name = window.prompt('Enter your name:', '')?.trim() || 'Player';
 
     const { Client } = await import('colyseus.js');
-    const client = new Client('ws://localhost:3000');
+    // Dynamic WebSocket URL — works on localhost, LAN, tunnels, and production
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname;
+    const port = window.location.port || (protocol === 'wss:' ? '443' : '80');
+    // In dev mode (Vite on 8080/5173), connect to server on 3000. In prod, same port.
+    const wsPort = (port === '8080' || port === '5173') ? '3000' : port;
+    const wsUrl = `${protocol}//${host}:${wsPort}`;
+    const client = new Client(wsUrl);
     const room = await client.joinOrCreate('race', { playerName: name });
     this.room = room;
     this.mySessionId = room.sessionId;
