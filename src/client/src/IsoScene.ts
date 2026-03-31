@@ -126,8 +126,9 @@ interface AvatarData {
   knockbackSlowed: boolean;
   stamina: number;
   sprinting: boolean;
-  /** Timestamp of last tile position change — used for animation grace period. */
   lastTileChange: number;
+  /** Vertical offset for jump animation — applied on top of normal position. */
+  jumpOffset: number;
 }
 
 // ─── Key-hold constants ──────────────────────────────────────────────────────
@@ -148,6 +149,7 @@ export class IsoScene extends Phaser.Scene {
 
   private avatars = new Map<number, AvatarData>();
   private mySlotIndex = -1;
+  private slotBySession = new Map<string, number>();
 
   private localTerrain: number[][] = [];
   private tileGfx!: Phaser.GameObjects.Graphics;
@@ -798,6 +800,7 @@ export class IsoScene extends Phaser.Scene {
       const isNew = !this.avatars.has(index);
       if (isNew) this.avatars.set(index, this.createAvatar(index));
       if (slot.sessionId === this.mySessionId) this.mySlotIndex = index;
+      if (slot.sessionId) this.slotBySession.set(slot.sessionId, index);
 
       const av = this.avatars.get(index)!;
       const newX = slot.tileX as number;
@@ -807,7 +810,10 @@ export class IsoScene extends Phaser.Scene {
       }
       av.tileX = newX;
       av.tileY = newY;
-      if (isNew) { av.displayX = av.tileX; av.displayY = av.tileY; }
+      if (isNew) {
+        av.displayX = newX;
+        av.displayY = newY;
+      }
       av.playerName = slot.playerName ?? '';
 
       // Detect hole fall (frozen transition) for sound/particles
@@ -871,7 +877,7 @@ export class IsoScene extends Phaser.Scene {
       currentTerrain: Terrain.Normal,
       heldPickup: null, shieldActive: false, speedBoosted: false,
       stuck: false, knockbackSlowed: false,
-      stamina: STAMINA_MAX, sprinting: false, lastTileChange: 0,
+      stamina: STAMINA_MAX, sprinting: false, lastTileChange: 0, jumpOffset: 0,
     };
   }
 
@@ -887,10 +893,10 @@ export class IsoScene extends Phaser.Scene {
     av.shadow.fillEllipse(sx, sy, 30, 12);
     av.shadow.setDepth(isoDepth(av.displayX, av.displayY) - 0.01);
 
-    // Sprite origin per character type
+    // Sprite origin per character type — jumpOffset lifts sprite during jump
     const charDef = SLOT_CHARACTERS[av.slotIndex % SLOT_CHARACTERS.length].char;
     av.sprite.setOrigin(charDef.originX, charDef.originY);
-    av.sprite.setPosition(sx, sy);
+    av.sprite.setPosition(sx, sy + av.jumpOffset);
     av.label.setPosition(sx, sy - 70).setText(av.playerName || `P${av.slotIndex + 1}`);
 
     const { text, color } = this.getStatusDisplay(av);
@@ -1108,11 +1114,13 @@ export class IsoScene extends Phaser.Scene {
       if (data.phase === RacePhase.Countdown && data.countdown > 0 && data.countdown <= 3) {
         this.sfxCountdownBeep();
       }
-      if (data.phase === RacePhase.Waiting && prevPhase === RacePhase.Finished) {
-        this.handleRaceReset();
-      }
       this.updatePhaseHud(data.phase, data.countdown, data.finishCountdown);
       data.slots.forEach((slot, index) => this.handleSlotChange(slot, index));
+
+      // Phase transitions that trigger UI reset
+      if ((data.phase === RacePhase.Waiting || data.phase === RacePhase.Countdown) && prevPhase === RacePhase.Finished) {
+        this.handleRaceReset();
+      }
     });
 
     room.onMessage('terrainChange', (data: { tileX: number; tileY: number; terrain: number }) => {
@@ -1132,6 +1140,16 @@ export class IsoScene extends Phaser.Scene {
       this.renderButtonLabels();
       this.renderPickups();
       this.renderSlimeZones();
+
+      // Force-snap ALL avatars after a short delay
+      // (ensures the state message with spawn positions has been processed)
+      setTimeout(() => {
+        for (const av of this.avatars.values()) {
+          av.displayX = av.tileX;
+          av.displayY = av.tileY;
+        }
+        this.handleRaceReset();
+      }, 100);
     });
 
     room.onMessage('playerFinished', (data: { playerName: string; position: number; timeSeconds: number }) => {
@@ -1189,6 +1207,21 @@ export class IsoScene extends Phaser.Scene {
     });
     room.onMessage('playerJumped', (data: { sessionId: string }) => {
       if (data.sessionId === this.mySessionId) this.sfxJump();
+      const jumpSlot = this.slotBySession.get(data.sessionId);
+      if (jumpSlot !== undefined) {
+        const av = this.avatars.get(jumpSlot);
+        if (av) {
+          // Animate jumpOffset: 0 → -16 → 0 (smooth arc applied on top of normal position)
+          av.jumpOffset = 0;
+          this.tweens.add({
+            targets: av,
+            jumpOffset: -16,
+            duration: 180,
+            yoyo: true,
+            ease: 'Quad.easeOut',
+          });
+        }
+      }
     });
     room.onMessage('buttonActivated', (data: { id: number }) => {
       this.sfxButtonPress();
@@ -1217,13 +1250,21 @@ export class IsoScene extends Phaser.Scene {
     this.raceStartTime = 0;
     this.slimeZones = [];
     this.renderSlimeZones();
+
+    // Force all avatars back to spawn area (server also resets positions)
+    for (const av of this.avatars.values()) {
+      av.displayX = av.tileX;
+      av.displayY = av.tileY;
+      // Force position update immediately
+      this.positionAvatar(av);
+    }
   }
 
   // ─── HUD ───────────────────────────────────────────────────────────────
 
   private addHud(): void {
     this.add
-      .text(10, 10, 'WASD move · SHIFT sprint · SPACE jump · E pickup', {
+      .text(10, 10, 'WASD · SHIFT sprint · SPACE jump · E pickup', {
         fontSize: '14px', color: '#aabbcc', backgroundColor: '#00000066', padding: { x: 8, y: 4 },
       })
       .setScrollFactor(0).setDepth(9999);

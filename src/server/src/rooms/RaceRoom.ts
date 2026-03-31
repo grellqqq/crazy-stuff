@@ -403,10 +403,10 @@ export class RaceRoom extends Room<RaceState> {
       pickups: this.pickups,
     });
 
-    for (let i = 0; i < this.state.slots.length; i++) {
-      const slot = this.state.slots[i];
+    for (const slot of this.state.slots) {
       if (!slot || !slot.occupied) continue;
-      const spawnY = SPAWN_Y - 4 + i * 2;
+      const idx = this.state.slots.indexOf(slot);
+      const spawnY = SPAWN_Y - 4 + idx * 2;
       slot.tileX = SPAWN_X;
       slot.tileY = spawnY;
       this.clearPlayerTimers(slot.sessionId);
@@ -660,8 +660,8 @@ export class RaceRoom extends Room<RaceState> {
     for (const pickup of this.pickups) {
       if (this.collectedPickups.has(pickup.id)) continue;
 
-      // Single tile overlap
-      if (slot.tileX !== pickup.x || slot.tileY !== pickup.y) continue;
+      // Collect if within 1 tile distance (accounts for diagonal movement)
+      if (Math.abs(slot.tileX - pickup.x) > 1 || Math.abs(slot.tileY - pickup.y) > 1) continue;
 
       // Collect it
       ps.heldPickup = pickup.type;
