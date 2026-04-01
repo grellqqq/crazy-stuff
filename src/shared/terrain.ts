@@ -90,7 +90,7 @@ export const KNOCKBACK_SLOW_CD = 400;
 
 // ─── Sprint & stamina ────────────────────────────────────────────────────────
 
-export const SPRINT_COOLDOWN      = 80;   // ms between moves while sprinting
+export const SPRINT_COOLDOWN      = 50;   // ms between moves while sprinting
 export const STAMINA_MAX          = 100;
 export const STAMINA_DRAIN        = 8;    // per sprint move
 export const STAMINA_REGEN_RATE   = 20;   // per second when not sprinting
@@ -110,9 +110,9 @@ export const PICKUP_NAMES: Record<number, string> = {
 
 // ─── Grid dimensions ─────────────────────────────────────────────────────────
 
-export const GRID_COLS    = 90;
+export const GRID_COLS    = 180;
 export const GRID_ROWS    = 30;
-export const GRID_COL_MAX = 89;
+export const GRID_COL_MAX = 179;
 export const GRID_ROW_MAX = 29;
 
 /** Player occupies a single tile. */
@@ -123,9 +123,9 @@ export const FOOTPRINT = 1;
 export const SPAWN_X = 2;
 export const SPAWN_Y = 14;
 
-export const FINISH_X     = 86;
-export const FINISH_Y_MIN = 8;
-export const FINISH_Y_MAX = 22;
+export const FINISH_X     = 176;
+export const FINISH_Y_MIN = 4;
+export const FINISH_Y_MAX = 25;
 
 // ─── Timing ──────────────────────────────────────────────────────────────────
 
@@ -247,18 +247,21 @@ function ensurePassable(map: number[][], trackTop: number, trackBot: number): vo
 }
 
 /**
- * Generate a fresh procedural race track.
+ * Generate a fresh procedural race track (180 cols × 30 rows).
  *
  * Zone layout (by column):
- *   0-6    Start area (Normal)
- *   7-17   Mud field (Slow blobs)
- *  18-31   Open corridor (Normal — pickups go here instead of boost tiles)
- *  32-51   Ice arena (Slide blobs)
- *  52-65   Crumble bridge (Crumble + Hole blobs)
- *  66-69   Recovery (Normal)
- *  70-78   Gauntlet (mixed Slow + Crumble + Hole)
- *  79-84   Sprint corridor (Normal — pickups)
- *  85-89   Finish zone (Normal)
+ *   0-8     Start area (Normal)
+ *   9-25    Mud field (Slow)
+ *  26-40    Open corridor (pickups)
+ *  41-70    Ice arena (Slide)
+ *  71-80    Recovery
+ *  81-110   Crumble bridge (Crumble + Holes)
+ * 111-120   Recovery
+ * 121-145   Gauntlet (mixed Slow + Crumble + Hole)
+ * 146-155   Sprint corridor (pickups)
+ * 156-170   Second ice section
+ * 171-175   Final sprint
+ * 176-179   Finish zone
  */
 export function generateTerrainMap(): number[][] {
   const map: number[][] = [];
@@ -269,61 +272,86 @@ export function generateTerrainMap(): number[][] {
   const tTop = 4;
   const tBot = 25;
 
-  // Zone 1: Mud field
-  for (let i = 0; i < 10; i++) {
-    placeOrganicBlob(map, Terrain.Slow, 7, 17, tTop, tBot, randomInt(5, 12));
+  // ── Side walls with hole gaps ─────────────────────────────────────────
+  // Row 3 (top border) and row 26 (bottom border) = walls
+  // Rows 2 and 27 = holes (fall off the edge)
+  for (let x = 0; x < GRID_COLS; x++) {
+    map[3][x] = Terrain.Wall;
+    map[26][x] = Terrain.Wall;
+    map[2][x] = Terrain.Hole;
+    map[27][x] = Terrain.Hole;
   }
-
-  // Zone 2: Open corridor (cols 18-31) — no terrain, pickups placed separately
-
-  // Zone 3: Ice arena
-  for (let i = 0; i < 15; i++) {
-    placeOrganicBlob(map, Terrain.Slide, 32, 51, tTop, tBot, randomInt(6, 14));
-  }
-
-  // Ice-to-hazard connections
-  for (let y = tTop; y <= tBot; y++) {
-    for (let x = 49; x <= 51; x++) {
-      if (map[y][x] === Terrain.Slide && x + 1 < GRID_COLS && map[y][x + 1] === Terrain.Normal) {
-        if (Math.random() < 0.25) {
-          map[y][x + 1] = Math.random() < 0.5 ? Terrain.Hole : Terrain.Crumble;
-        }
+  // Random gaps in the side walls (every 8-15 tiles, 2-3 tiles wide)
+  for (let x = 10; x < GRID_COLS - 10; x += randomInt(8, 15)) {
+    const gapW = randomInt(2, 3);
+    for (let dx = 0; dx < gapW; dx++) {
+      if (x + dx < GRID_COLS) {
+        map[3][x + dx] = Terrain.Normal;   // gap in top wall
+        map[26][x + dx] = Terrain.Normal;  // gap in bottom wall
       }
     }
   }
 
-  // Zone 4: Crumble bridge
+  // ── Zone 1: Mud field ─────────────────────────────────────────────────
+  for (let i = 0; i < 15; i++) {
+    placeOrganicBlob(map, Terrain.Slow, 9, 25, tTop, tBot, randomInt(5, 14));
+  }
+
+  // ── Zone 2: First ice arena ───────────────────────────────────────────
+  for (let i = 0; i < 20; i++) {
+    placeOrganicBlob(map, Terrain.Slide, 41, 70, tTop, tBot, randomInt(6, 16));
+  }
+  // Ice-to-hazard connections
+  for (let y = tTop; y <= tBot; y++) {
+    for (let x = 67; x <= 70; x++) {
+      if (map[y][x] === Terrain.Slide && x + 1 < GRID_COLS && map[y][x + 1] === Terrain.Normal) {
+        if (Math.random() < 0.2) map[y][x + 1] = Math.random() < 0.5 ? Terrain.Hole : Terrain.Crumble;
+      }
+    }
+  }
+
+  // ── Zone 3: Crumble bridge ────────────────────────────────────────────
+  for (let i = 0; i < 20; i++) {
+    placeOrganicBlob(map, Terrain.Crumble, 81, 110, tTop, tBot, randomInt(5, 14));
+  }
+  for (let i = 0; i < 10; i++) {
+    placeOrganicBlob(map, Terrain.Hole, 86, 108, tTop + 2, tBot - 2, randomInt(2, 6));
+  }
+
+  // ── Zone 4: Gauntlet ──────────────────────────────────────────────────
+  for (let i = 0; i < 10; i++) {
+    placeOrganicBlob(map, Terrain.Slow, 121, 135, tTop, tBot, randomInt(4, 10));
+  }
   for (let i = 0; i < 12; i++) {
-    placeOrganicBlob(map, Terrain.Crumble, 52, 65, tTop, tBot, randomInt(5, 12));
+    placeOrganicBlob(map, Terrain.Crumble, 128, 145, tTop, tBot, randomInt(4, 12));
   }
   for (let i = 0; i < 6; i++) {
-    placeOrganicBlob(map, Terrain.Hole, 55, 63, tTop + 2, tBot - 2, randomInt(2, 5));
+    placeOrganicBlob(map, Terrain.Hole, 132, 145, tTop + 3, tBot - 3, randomInt(2, 5));
   }
 
-  // Zone 5: Gauntlet
-  for (let i = 0; i < 6; i++) {
-    placeOrganicBlob(map, Terrain.Slow, 70, 75, tTop, tBot, randomInt(3, 8));
-  }
-  for (let i = 0; i < 7; i++) {
-    placeOrganicBlob(map, Terrain.Crumble, 72, 78, tTop, tBot, randomInt(4, 10));
-  }
-  for (let i = 0; i < 4; i++) {
-    placeOrganicBlob(map, Terrain.Hole, 74, 78, tTop + 3, tBot - 3, randomInt(2, 4));
+  // ── Zone 5: Second ice section ────────────────────────────────────────
+  for (let i = 0; i < 12; i++) {
+    placeOrganicBlob(map, Terrain.Slide, 156, 170, tTop, tBot, randomInt(5, 12));
   }
 
-  // Zone 6: Sprint corridor (cols 79-84) — no terrain, pickups placed separately
+  // ── Interior walls ────────────────────────────────────────────────────
+  placeWallSegments(map, 14, 24, tTop, tBot, 4);
+  placeWallSegments(map, 35, 40, tTop, tBot, 3);
+  placeWallSegments(map, 50, 65, tTop, tBot, 5);
+  placeWallSegments(map, 75, 80, tTop, tBot, 2);
+  placeWallSegments(map, 90, 108, tTop, tBot, 5);
+  placeWallSegments(map, 115, 120, tTop, tBot, 2);
+  placeWallSegments(map, 130, 145, tTop, tBot, 4);
+  placeWallSegments(map, 150, 155, tTop, tBot, 2);
+  placeWallSegments(map, 160, 170, tTop, tBot, 3);
 
-  // Walls
-  placeWallSegments(map, 10, 16, tTop, tBot, 3);
-  placeWallSegments(map, 28, 31, tTop, tBot, 2);
-  placeWallSegments(map, 38, 48, tTop, tBot, 4);
-  placeWallSegments(map, 54, 64, tTop, tBot, 3);
-  placeWallSegments(map, 66, 69, tTop, tBot, 2);
-  placeWallSegments(map, 72, 78, tTop, tBot, 3);
-
-  // Safety clears
-  clearRect(map, 0, 6, SPAWN_Y - 2, SPAWN_Y + 2);
-  clearRect(map, FINISH_X, GRID_COL_MAX, FINISH_Y_MIN, FINISH_Y_MAX);
+  // ── Safety clears ─────────────────────────────────────────────────────
+  clearRect(map, 0, 8, SPAWN_Y - 4, SPAWN_Y + 4);    // spawn area
+  clearRect(map, 0, 8, 3, 3);                          // clear top wall at spawn
+  clearRect(map, 0, 8, 26, 26);                        // clear bottom wall at spawn
+  clearRect(map, FINISH_X, GRID_COL_MAX, tTop, tBot);  // finish zone
+  clearRect(map, FINISH_X, GRID_COL_MAX, 3, 3);        // clear top wall at finish
+  clearRect(map, FINISH_X, GRID_COL_MAX, 26, 26);      // clear bottom wall at finish
 
   ensurePassable(map, tTop, tBot);
 
@@ -339,12 +367,15 @@ const BUTTON_TARGET: Record<number, { w: number; h: number }> = {
 };
 
 const BUTTON_SLOTS: { xMin: number; xMax: number; targetAhead: number }[] = [
-  { xMin: 12, xMax: 16, targetAhead: 6 },
-  { xMin: 28, xMax: 31, targetAhead: 8 },
-  { xMin: 40, xMax: 46, targetAhead: 6 },
-  { xMin: 56, xMax: 62, targetAhead: 5 },
-  { xMin: 66, xMax: 69, targetAhead: 6 },
-  { xMin: 73, xMax: 76, targetAhead: 5 },
+  { xMin: 15, xMax: 24, targetAhead: 8 },
+  { xMin: 35, xMax: 40, targetAhead: 8 },
+  { xMin: 55, xMax: 65, targetAhead: 6 },
+  { xMin: 75, xMax: 80, targetAhead: 8 },
+  { xMin: 95, xMax: 108, targetAhead: 6 },
+  { xMin: 115, xMax: 120, targetAhead: 8 },
+  { xMin: 135, xMax: 145, targetAhead: 6 },
+  { xMin: 150, xMax: 155, targetAhead: 6 },
+  { xMin: 162, xMax: 170, targetAhead: 5 },
 ];
 
 export function generateButtons(map: number[][]): ButtonDef[] {
@@ -393,13 +424,15 @@ export function generateButtons(map: number[][]): ButtonDef[] {
  * Each zone spawns 1-2 pickups on Normal terrain.
  */
 const PICKUP_ZONES: { xMin: number; xMax: number; count: number }[] = [
-  { xMin: 8,  xMax: 16, count: 1 },  // mud field
-  { xMin: 18, xMax: 27, count: 2 },  // open corridor (was boost)
-  { xMin: 34, xMax: 50, count: 2 },  // ice arena edges
-  { xMin: 54, xMax: 64, count: 2 },  // crumble zone
-  { xMin: 66, xMax: 69, count: 1 },  // recovery
-  { xMin: 72, xMax: 78, count: 1 },  // gauntlet
-  { xMin: 79, xMax: 84, count: 2 },  // sprint corridor (was boost)
+  { xMin: 10, xMax: 24, count: 2 },
+  { xMin: 26, xMax: 40, count: 2 },
+  { xMin: 45, xMax: 68, count: 3 },
+  { xMin: 71, xMax: 80, count: 2 },
+  { xMin: 85, xMax: 108, count: 3 },
+  { xMin: 111, xMax: 120, count: 2 },
+  { xMin: 125, xMax: 145, count: 3 },
+  { xMin: 146, xMax: 155, count: 2 },
+  { xMin: 158, xMax: 170, count: 2 },
 ];
 
 /**

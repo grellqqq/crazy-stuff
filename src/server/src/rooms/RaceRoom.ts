@@ -36,21 +36,23 @@ class RaceState extends Schema {
 
 // ─── Movement ────────────────────────────────────────────────────────────────
 
+/** 8-direction movement: 4 diagonals (single keys) + 4 cardinals (key combos). */
 const MOVE_DELTAS: Record<string, [number, number]> = {
-  W: [-1, -1], S: [1, 1], A: [-1, 1], D: [1, -1],
+  W: [-1, -1], S: [1, 1], A: [-1, 1], D: [1, -1],     // diagonals
+  WD: [0, -1], WA: [-1, 0], SD: [1, 0], SA: [0, 1],    // cardinals
 };
 const MOVE_MAX_X = GRID_COL_MAX;
 const MOVE_MAX_Y = GRID_ROW_MAX;
 
 // ─── Timing (ms) ─────────────────────────────────────────────────────────────
 
-const DEFAULT_COOLDOWN = 150;
-const SLOW_COOLDOWN    = 500;
+const DEFAULT_COOLDOWN = 100;
+const SLOW_COOLDOWN    = 350;
 const HOLE_RESPAWN_MS  = 3000;
-const HOLE_PENALTY_MS  = 3000;
-const HOLE_PENALTY_CD  = 650;
+const HOLE_PENALTY_MS  = 2000;
+const HOLE_PENALTY_CD  = 450;
 const CRUMBLE_DELAY_MS = 1500;
-const SLIDE_EXTRA_TILES = 2;
+const SLIDE_EXTRA_TILES = 1;
 
 // ─── Per-player state ────────────────────────────────────────────────────────
 
@@ -62,6 +64,8 @@ interface PlayerState {
   holeTimer: ReturnType<typeof setTimeout> | null;
   penaltyTimer: ReturnType<typeof setTimeout> | null;
   penalized: boolean;
+  /** Immune to holes/traps until this timestamp (post-respawn). */
+  immuneUntil: number;
   finished: boolean;
   buttonsActivated: number;
   // Pickup state
@@ -92,6 +96,7 @@ function newPlayerState(): PlayerState {
     holeTimer: null,
     penaltyTimer: null,
     penalized: false,
+    immuneUntil: 0,
     finished: false,
     buttonsActivated: 0,
     heldPickup: null,
@@ -557,6 +562,7 @@ export class RaceRoom extends Room<RaceState> {
 
     switch (t) {
       case Terrain.Hole:
+        if (ps.immuneUntil > Date.now()) break; // immune after respawn
         if (ps.shieldActive) {
           ps.shieldActive = false;
           this.broadcast('shieldUsed', { sessionId });
@@ -588,6 +594,7 @@ export class RaceRoom extends Room<RaceState> {
       if (!s || !p) return;
       s.tileX = p.lastSafeX; s.tileY = p.lastSafeY;
       p.frozen = false; p.holeTimer = null;
+      p.immuneUntil = Date.now() + 2000; // 2s immunity after respawn
       p.penalized = true; p.currentCooldown = HOLE_PENALTY_CD;
       p.penaltyTimer = setTimeout(() => {
         const pp = this.players.get(sessionId);
@@ -693,6 +700,7 @@ export class RaceRoom extends Room<RaceState> {
         break;
       case PickupType.Knockback:
         this.activateKnockback(sessionId, slot);
+        this.broadcast('knockbackBlast', { x: slot.tileX, y: slot.tileY });
         break;
     }
 
@@ -927,6 +935,7 @@ export class RaceRoom extends Room<RaceState> {
           knockbackSlowed: ps ? ps.knockbackSlowUntil > now : false,
           stamina: ps?.stamina ?? STAMINA_MAX,
           sprinting: ps?.sprinting ?? false,
+          immune: ps ? ps.immuneUntil > now : false,
         };
       }),
     });

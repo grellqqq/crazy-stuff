@@ -55,25 +55,33 @@ const CHAR_SPACESUIT: CharacterDef = {
   originX: 0.5,
   originY: 0.85,
   dirMap: {
-    S: { row: 0, flipX: false },
-    A: { row: 1, flipX: false },
-    D: { row: 2, flipX: false },
-    W: { row: 3, flipX: false },
+    S:  { row: 0, flipX: false },  // SE
+    SA: { row: 0, flipX: false },  // S → nearest is SE
+    A:  { row: 1, flipX: false },  // SW
+    WA: { row: 1, flipX: false },  // W → nearest is SW
+    W:  { row: 3, flipX: false },  // NW
+    WD: { row: 3, flipX: false },  // N → nearest is NW
+    D:  { row: 2, flipX: false },  // NE
+    SD: { row: 2, flipX: false },  // E → nearest is NE
   },
 };
 
 const CHAR_KNIGHT: CharacterDef = {
   key: 'knight',
   multiSheet: true,
-  scale: 0.66,
+  scale: 0.75,
   framesPerDir: 9,
   originX: 0.52,
   originY: 0.50,
   dirMap: {
-    S: { sheetSuffix: '_S', flipX: false },
-    A: { sheetSuffix: '_A', flipX: false },
-    W: { sheetSuffix: '_W', flipX: false },
-    D: { sheetSuffix: '_D', flipX: false },
+    S:  { sheetSuffix: '_S',  flipX: false },  // SE (dir1)
+    SA: { sheetSuffix: '_SA', flipX: false },  // S  (dir2)
+    A:  { sheetSuffix: '_A',  flipX: false },  // SW (dir3)
+    WA: { sheetSuffix: '_WA', flipX: false },  // W  (dir4)
+    W:  { sheetSuffix: '_W',  flipX: false },  // NW (dir5)
+    WD: { sheetSuffix: '_WD', flipX: false },  // N  (dir6)
+    D:  { sheetSuffix: '_D',  flipX: false },  // NE (dir7)
+    SD: { sheetSuffix: '_SD', flipX: false },  // E  (dir8)
   },
 };
 
@@ -126,6 +134,7 @@ interface AvatarData {
   knockbackSlowed: boolean;
   stamina: number;
   sprinting: boolean;
+  immune: boolean;
   lastTileChange: number;
   /** Vertical offset for jump animation — applied on top of normal position. */
   jumpOffset: number;
@@ -145,7 +154,7 @@ export class IsoScene extends Phaser.Scene {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private room: any = null;
 
-  private playerFacing: 'W' | 'A' | 'S' | 'D' = 'S';
+  private playerFacing = 'S';
 
   private avatars = new Map<number, AvatarData>();
   private mySlotIndex = -1;
@@ -201,7 +210,7 @@ export class IsoScene extends Phaser.Scene {
   // ─── Inertia ───────────────────────────────────────────────────────────
   private wasSprinting = false;
   private inertiaRemaining = 0;
-  private inertiaDir: 'W' | 'A' | 'S' | 'D' | null = null;
+  private inertiaDir: string | null = null;
 
   // ─── Particles & Sound ──────────────────────────────────────────────────
   private audioCtx: AudioContext | null = null;
@@ -215,10 +224,15 @@ export class IsoScene extends Phaser.Scene {
   preload(): void {
     // Character sprites
     this.load.spritesheet('spacesuit', '/sprites/space_suit.png', { frameWidth: 80, frameHeight: 80 });
-    this.load.spritesheet('knight_S', '/sprites/knight/walk_dir1.png', { frameWidth: 512, frameHeight: 512 });
-    this.load.spritesheet('knight_A', '/sprites/knight/walk_dir3.png', { frameWidth: 512, frameHeight: 512 });
-    this.load.spritesheet('knight_W', '/sprites/knight/walk_dir5.png', { frameWidth: 512, frameHeight: 512 });
-    this.load.spritesheet('knight_D', '/sprites/knight/walk_dir7.png', { frameWidth: 512, frameHeight: 512 });
+    // Knight: 8 directions (dir1=SE, dir2=S, dir3=SW, dir4=W, dir5=NW, dir6=N, dir7=NE, dir8=E)
+    this.load.spritesheet('knight_S',  '/sprites/knight/walk_dir1.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_SA', '/sprites/knight/walk_dir2.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_A',  '/sprites/knight/walk_dir3.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_WA', '/sprites/knight/walk_dir4.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_W',  '/sprites/knight/walk_dir5.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_WD', '/sprites/knight/walk_dir6.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_D',  '/sprites/knight/walk_dir7.png', { frameWidth: 512, frameHeight: 512 });
+    this.load.spritesheet('knight_SD', '/sprites/knight/walk_dir8.png', { frameWidth: 512, frameHeight: 512 });
 
     // Tile textures (SBS 128×64 isometric tiles, 3×6 grid per sheet)
     this.load.image('tiles_grass', '/tiles/grass.png');
@@ -240,9 +254,10 @@ export class IsoScene extends Phaser.Scene {
   create(): void {
     this.initEmptyTerrain();
 
-    // Create walk animations for all character types
+    // Create walk animations for all character types (8 directions)
+    const allDirs = ['S', 'SA', 'A', 'WA', 'W', 'WD', 'D', 'SD'];
     for (const charDef of [CHAR_SPACESUIT, CHAR_KNIGHT]) {
-      for (const dir of ['S', 'A', 'W', 'D'] as const) {
+      for (const dir of allDirs) {
         const mapping = charDef.dirMap[dir];
         if (charDef.multiSheet) {
           // Multi-sheet: each direction is a separate texture
@@ -323,19 +338,22 @@ export class IsoScene extends Phaser.Scene {
   // ─── Update ────────────────────────────────────────────────────────────
 
   update(_time: number, _delta: number): void {
-    // Smoother lerp for larger tiles — lower exponent = more glide
-    const t = 1 - Math.pow(0.00005, _delta / 1000);
+    // Base lerp factor — frame-rate independent
+    const tNormal = 1 - Math.pow(0.00005, _delta / 1000);
+    // Slower lerp for slow terrain — spreads movement over more frames (less jerky)
+    const tSlow = 1 - Math.pow(0.0003, _delta / 1000);
 
     for (const av of this.avatars.values()) {
       const dx = av.tileX - av.displayX;
       const dy = av.tileY - av.displayY;
+      const lerpT = (av.currentTerrain === Terrain.Slow || av.penalized || av.knockbackSlowed) ? tSlow : tNormal;
 
       if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
         av.displayX = av.tileX;
         av.displayY = av.tileY;
       } else if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
-        av.displayX += dx * t;
-        av.displayY += dy * t;
+        av.displayX += dx * lerpT;
+        av.displayY += dy * lerpT;
       } else {
         av.displayX = av.tileX;
         av.displayY = av.tileY;
@@ -354,8 +372,13 @@ export class IsoScene extends Phaser.Scene {
     const localAv = this.avatars.get(this.mySlotIndex);
     if (localAv && (localAv.frozen || localAv.stuck)) {
       localAv.sprite.setVisible(Math.floor(_time / 500) % 2 === 0);
+      localAv.sprite.setAlpha(1);
+    } else if (localAv && localAv.immune) {
+      localAv.sprite.setVisible(true);
+      localAv.sprite.setAlpha(0.5 + Math.sin(_time / 100) * 0.2); // pulsing ghost
     } else if (localAv) {
       localAv.sprite.setVisible(true);
+      localAv.sprite.setAlpha(1);
     }
 
     this.updatePickupHud();
@@ -370,15 +393,27 @@ export class IsoScene extends Phaser.Scene {
     this.renderPickupGlow(_time);
     this.updateMinimapPlayers();
 
-    // Key-hold auto-repeat + inertia
-    const anyDirHeld = this.keys.D?.isDown || this.keys.S?.isDown || this.keys.W?.isDown || this.keys.A?.isDown;
+    // 8-direction key detection + auto-repeat + inertia
+    const w = this.keys.W?.isDown;
+    const a = this.keys.A?.isDown;
+    const s = this.keys.S?.isDown;
+    const d = this.keys.D?.isDown;
+    const anyDirHeld = w || a || s || d;
+
+    // Determine combined direction from held keys
+    let heldDir: string | null = null;
+    if (w && d)      heldDir = 'WD';  // North
+    else if (w && a) heldDir = 'WA';  // West
+    else if (s && d) heldDir = 'SD';  // East
+    else if (s && a) heldDir = 'SA';  // South
+    else if (d)      heldDir = 'D';   // NE
+    else if (s)      heldDir = 'S';   // SE
+    else if (w)      heldDir = 'W';   // NW
+    else if (a)      heldDir = 'A';   // SW
 
     if (this.currentPhase === RacePhase.Racing && Date.now() - this.lastSendTime >= SEND_INTERVAL) {
-      if (anyDirHeld) {
-        if (this.keys.D?.isDown) this.sendMove('D');
-        else if (this.keys.S?.isDown) this.sendMove('S');
-        else if (this.keys.W?.isDown) this.sendMove('W');
-        else if (this.keys.A?.isDown) this.sendMove('A');
+      if (heldDir) {
+        this.sendMove(heldDir);
       } else if (this.inertiaRemaining > 0 && this.inertiaDir) {
         this.inertiaRemaining--;
         if (this.room) this.room.send('move', { direction: this.inertiaDir, sprint: false });
@@ -771,10 +806,11 @@ export class IsoScene extends Phaser.Scene {
     this.keys = kb.addKeys('W,A,S,D') as Record<string, Phaser.Input.Keyboard.Key>;
     this.shiftKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
-    kb.on('keydown-W', () => this.sendMove('W'));
-    kb.on('keydown-S', () => this.sendMove('S'));
-    kb.on('keydown-A', () => this.sendMove('A'));
-    kb.on('keydown-D', () => this.sendMove('D'));
+    // First keydown detects combos for immediate response
+    kb.on('keydown-W', () => this.sendMove(this.keys.D?.isDown ? 'WD' : this.keys.A?.isDown ? 'WA' : 'W'));
+    kb.on('keydown-S', () => this.sendMove(this.keys.D?.isDown ? 'SD' : this.keys.A?.isDown ? 'SA' : 'S'));
+    kb.on('keydown-A', () => this.sendMove(this.keys.W?.isDown ? 'WA' : this.keys.S?.isDown ? 'SA' : 'A'));
+    kb.on('keydown-D', () => this.sendMove(this.keys.W?.isDown ? 'WD' : this.keys.S?.isDown ? 'SD' : 'D'));
     kb.on('keydown-E', () => {
       if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('usePickup');
     });
@@ -783,7 +819,7 @@ export class IsoScene extends Phaser.Scene {
     });
   }
 
-  private sendMove(direction: 'W' | 'A' | 'S' | 'D'): void {
+  private sendMove(direction: string): void {
     if (this.currentPhase !== RacePhase.Racing) return;
     this.playerFacing = direction;
     this.lastSendTime = Date.now();
@@ -832,6 +868,7 @@ export class IsoScene extends Phaser.Scene {
       av.knockbackSlowed = slot.knockbackSlowed ?? false;
       av.stamina = slot.stamina ?? STAMINA_MAX;
       av.sprinting = slot.sprinting ?? false;
+      av.immune = slot.immune ?? false;
 
       // Update sprite animation & tint
       const isLocal = slot.sessionId === this.mySessionId;
@@ -877,7 +914,7 @@ export class IsoScene extends Phaser.Scene {
       currentTerrain: Terrain.Normal,
       heldPickup: null, shieldActive: false, speedBoosted: false,
       stuck: false, knockbackSlowed: false,
-      stamina: STAMINA_MAX, sprinting: false, lastTileChange: 0, jumpOffset: 0,
+      stamina: STAMINA_MAX, sprinting: false, immune: false, lastTileChange: 0, jumpOffset: 0,
     };
   }
 
@@ -926,7 +963,14 @@ export class IsoScene extends Phaser.Scene {
       if (currentKey !== animKey || !av.sprite.anims.isPlaying) {
         av.sprite.play(animKey);
       }
-      av.sprite.anims.timeScale = (av.sprinting || av.speedBoosted) ? 1.5 : 1.0;
+      // Animation speed: faster when sprinting, slower on slow tiles
+      if (av.sprinting || av.speedBoosted) {
+        av.sprite.anims.timeScale = 2.0;
+      } else if (av.currentTerrain === Terrain.Slow) {
+        av.sprite.anims.timeScale = 0.5;
+      } else {
+        av.sprite.anims.timeScale = 1.0;
+      }
     } else {
       // Truly idle — static frame of current direction
       if (av.sprite.anims.isPlaying) {
@@ -954,6 +998,7 @@ export class IsoScene extends Phaser.Scene {
 
   private getStatusDisplay(av: AvatarData): { text: string; color: string } {
     if (av.frozen)           return { text: 'FELL!',   color: '#ff4444' };
+    if (av.immune)           return { text: 'IMMUNE',  color: '#ffffff' };
     if (av.stuck)            return { text: 'STUCK',   color: '#ff4444' };
     if (av.speedBoosted)     return { text: 'SPEED!',  color: '#ffd700' };
     if (av.shieldActive)     return { text: 'SHIELD',  color: '#44ffff' };
@@ -1205,6 +1250,28 @@ export class IsoScene extends Phaser.Scene {
         this.emitAtPlayer(0xaaff00, 8);
       }
     });
+    room.onMessage('knockbackBlast', (data: { x: number; y: number }) => {
+      this.sfxKnockback();
+      const { x, y } = tileToScreen(data.x, data.y);
+      const wx = this.originX + x;
+      const wy = this.originY + y + TILE_H / 2;
+      // Expanding ring effect
+      const ring = this.add.graphics().setDepth(10000);
+      let radius = 10;
+      const expandTimer = this.time.addEvent({
+        delay: 16,
+        repeat: 20,
+        callback: () => {
+          ring.clear();
+          radius += 8;
+          const alpha = 1 - (radius / 180);
+          ring.lineStyle(3, 0xff6644, Math.max(0, alpha));
+          ring.strokeCircle(wx, wy, radius);
+        },
+      });
+      this.time.delayedCall(400, () => { ring.destroy(); });
+    });
+
     room.onMessage('playerJumped', (data: { sessionId: string }) => {
       if (data.sessionId === this.mySessionId) this.sfxJump();
       const jumpSlot = this.slotBySession.get(data.sessionId);
