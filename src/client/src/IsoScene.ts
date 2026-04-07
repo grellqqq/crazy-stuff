@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { authenticate, type AuthState } from './auth';
+import { type AuthState } from './auth';
 import {
   Terrain, GRID_COLS, GRID_ROWS, RacePhase,
   FINISH_X, FINISH_Y_MIN, FINISH_Y_MAX, SPAWN_X, SPAWN_Y,
@@ -1387,12 +1387,13 @@ export class IsoScene extends Phaser.Scene {
   // ─── Network ───────────────────────────────────────────────────────────
 
   private async connectToRace(): Promise<void> {
-    // Authenticate — login or register required
-    this.authState = await authenticate();
-    const name = this.authState.username;
+    // Auth state passed from TitleScene
+    const sceneData = this.scene.settings.data as { authState?: AuthState } | undefined;
+    this.authState = sceneData?.authState ?? null;
+    const name = this.authState?.username ?? 'Player';
 
     // Fetch and show player profile HUD
-    if (this.authState.session) {
+    if (this.authState?.session) {
       this.createProfileHud(this.authState.session.user.id);
     }
 
