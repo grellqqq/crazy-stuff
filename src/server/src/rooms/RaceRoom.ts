@@ -420,7 +420,10 @@ export class RaceRoom extends Room<RaceState> {
   }
 
   private rematchMajority(): number {
-    return Math.ceil(this.occupiedCount() / 2);
+    const count = this.occupiedCount();
+    if (count <= 1) return 1;
+    // Require more than half — with 2 players both must vote, with 3 need 2, etc.
+    return Math.floor(count / 2) + 1;
   }
 
   private handleRematchVote(sessionId: string): void {
