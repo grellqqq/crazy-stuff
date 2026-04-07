@@ -4,6 +4,7 @@ import path from 'path';
 import express from 'express';
 import { Server } from 'colyseus';
 import { LobbyRoom } from './rooms/LobbyRoom';
+import { QueueRoom } from './rooms/QueueRoom';
 import { RaceRoom } from './rooms/RaceRoom';
 
 const app = express();
@@ -40,6 +41,7 @@ const httpServer = http.createServer(app);
 const gameServer = new Server({ server: httpServer });
 
 gameServer.define('lobby', LobbyRoom);
+gameServer.define('queue', QueueRoom);
 gameServer.define('race', RaceRoom);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
