@@ -1,5 +1,6 @@
 import { Room, Client } from 'colyseus';
 import { Schema, ArraySchema, type } from '@colyseus/schema';
+import { awardPostRace, getOrCreatePlayer } from '../db/supabase';
 import {
   Terrain, generateTerrainMap, generateButtons, generatePickups,
   GRID_COL_MAX, GRID_ROW_MAX, SPAWN_X, SPAWN_Y,
@@ -428,7 +429,7 @@ export class RaceRoom extends Room<RaceState> {
   /** Start the rematch vote window. Auto-resets after timeout if no majority. */
   private async awardPlayers(results: RaceResult[]): Promise<void> {
     try {
-      const { awardPostRace, getOrCreatePlayer } = await import('./db/supabase');
+      // awardPostRace and getOrCreatePlayer imported at top of file
       for (const r of results) {
         const authId = this.authIds.get(r.sessionId);
         if (!authId) continue; // guest player, skip

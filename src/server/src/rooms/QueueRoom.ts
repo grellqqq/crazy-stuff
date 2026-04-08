@@ -51,7 +51,7 @@ export class QueueRoom extends Room<QueueState> {
   onLeave(client: Client): void {
     const idx = this.state.players.findIndex(p => p.sessionId === client.sessionId);
     if (idx !== -1) {
-      const name = this.state.players[idx].playerName;
+      const name = this.state.players[idx]?.playerName ?? 'unknown';
       this.state.players.splice(idx, 1);
       this.authIds.delete(client.sessionId);
       console.log(`[QueueRoom] left: ${name} (${this.state.players.length}/${MAX_PLAYERS})`);
