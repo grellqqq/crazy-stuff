@@ -525,7 +525,10 @@ export class LobbyScene extends Phaser.Scene {
 
   private cleanupScene(): void {
     if (this.profilePanel) { this.profilePanel.remove(); this.profilePanel = null; }
-    if (this.profileBtn) { this.profileBtn.remove(); this.profileBtn = null; }
+    const hudBtns = document.getElementById('hud-buttons');
+    if (hudBtns) hudBtns.remove();
+    this.profileBtn = null;
+    this.inventoryBtn = null;
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
     if (this.chatBox) { this.chatBox.remove(); this.chatBox = null; }
     this.destroyQueueUI();
@@ -594,23 +597,44 @@ export class LobbyScene extends Phaser.Scene {
     this.equipCharOnServer(charKey);
   }
 
-  /** Create the small Profile button in the top-right corner. */
+  /** Create the Profile + Inventory buttons in the top-right corner. */
+  private inventoryBtn: HTMLButtonElement | null = null;
+
   private createProfileButton(): void {
     if (this.profileBtn) return;
-    const btn = document.createElement('button');
-    btn.id = 'profile-btn';
-    btn.textContent = 'Profile';
-    btn.style.cssText = `
+
+    const container = document.createElement('div');
+    container.id = 'hud-buttons';
+    container.style.cssText = `
       position: fixed; top: 10px; right: 10px; z-index: 5000;
+      display: flex; gap: 8px;
+    `;
+
+    const btnStyle = `
       background: rgba(0,0,0,0.75); border: 1px solid #555; border-radius: 6px;
-      padding: 8px 18px; font-family: monospace; color: #ffdd44; font-size: 14px;
+      padding: 8px 18px; font-family: monospace; font-size: 14px;
       font-weight: bold; cursor: pointer;
     `;
-    btn.onmouseenter = () => { btn.style.borderColor = '#ffdd44'; };
-    btn.onmouseleave = () => { btn.style.borderColor = '#555'; };
-    btn.onclick = () => this.toggleProfilePanel();
-    document.body.appendChild(btn);
-    this.profileBtn = btn;
+
+    const profBtn = document.createElement('button');
+    profBtn.textContent = '👤 Profile';
+    profBtn.style.cssText = btnStyle + 'color: #ffdd44;';
+    profBtn.onmouseenter = () => { profBtn.style.borderColor = '#ffdd44'; };
+    profBtn.onmouseleave = () => { profBtn.style.borderColor = '#555'; };
+    profBtn.onclick = () => this.toggleProfilePanel();
+    container.appendChild(profBtn);
+    this.profileBtn = profBtn;
+
+    const invBtn = document.createElement('button');
+    invBtn.textContent = '🎒 Inventory';
+    invBtn.style.cssText = btnStyle + 'color: #88ccff;';
+    invBtn.onmouseenter = () => { invBtn.style.borderColor = '#88ccff'; };
+    invBtn.onmouseleave = () => { invBtn.style.borderColor = '#555'; };
+    invBtn.onclick = () => this.toggleInventory();
+    container.appendChild(invBtn);
+    this.inventoryBtn = invBtn;
+
+    document.body.appendChild(container);
   }
 
   /** Toggle the Profile panel open/closed. */
@@ -876,6 +900,9 @@ export class LobbyScene extends Phaser.Scene {
       if (e.key === 'Enter' && input.value.trim()) {
         this.sendChat(input.value.trim());
         input.value = '';
+        input.blur(); // unfocus so player can move again
+      } else if (e.key === 'Escape') {
+        input.blur();
       }
     });
     input.addEventListener('keyup', (e) => e.stopPropagation());
