@@ -30,6 +30,17 @@ export class LobbyRoom extends Room<LobbyState> {
       p.moving = data.moving;
     });
 
+    this.onMessage('changeChar', (client, data: { charKey: string }) => {
+      const allowed = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
+      if (!data?.charKey || !allowed.includes(data.charKey)) return;
+      const p = this.lobbyPlayers.get(client.sessionId);
+      if (!p) return;
+      p.charKey = data.charKey;
+      // Immediate broadcast so everyone sees the change right away
+      const players = Array.from(this.lobbyPlayers.values());
+      this.broadcast('lobbyState', { players });
+    });
+
     // Broadcast positions at 10 ticks/sec
     this.setSimulationInterval(() => {
       const players = Array.from(this.lobbyPlayers.values());

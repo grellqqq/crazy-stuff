@@ -78,6 +78,35 @@ export async function getPlayer(authId: string) {
   return data;
 }
 
+/** Get the player's equipped character key. */
+export async function getEquippedChar(authId: string): Promise<string> {
+  const { data } = await supabase
+    .from('players')
+    .select('equipped_char')
+    .eq('auth_id', authId)
+    .single();
+  return data?.equipped_char ?? 'male';
+}
+
+/** Set the player's equipped character key. Returns the new value or null on failure. */
+export async function equipChar(authId: string, charKey: string): Promise<string | null> {
+  const allowed = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
+  if (!allowed.includes(charKey)) return null;
+
+  const { data, error } = await supabase
+    .from('players')
+    .update({ equipped_char: charKey, updated_at: new Date().toISOString() })
+    .eq('auth_id', authId)
+    .select('equipped_char')
+    .single();
+
+  if (error) {
+    console.error('[DB] Failed to equip char:', error);
+    return null;
+  }
+  return data?.equipped_char ?? null;
+}
+
 /** Get player inventory. */
 export async function getInventory(authId: string) {
   const { data: player } = await supabase

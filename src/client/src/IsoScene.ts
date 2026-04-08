@@ -1802,6 +1802,21 @@ export class IsoScene extends Phaser.Scene {
     container.appendChild(btn);
     this.rematchBtn = btn;
 
+    const lobbyBtn = document.createElement('button');
+    lobbyBtn.textContent = 'Back to Lobby';
+    lobbyBtn.style.cssText = `
+      margin-top: 10px; padding: 8px 24px; font-size: 13px;
+      background: transparent; color: #888; border: 1px solid #555;
+      border-radius: 4px; cursor: pointer; font-family: monospace;
+      display: block; margin-left: auto; margin-right: auto;
+    `;
+    lobbyBtn.addEventListener('click', () => {
+      this.destroyResultsContainer();
+      if (this.room) { this.room.leave(); this.room = null; }
+      this.scene.start('LobbyScene', { authState: this.authState });
+    });
+    container.appendChild(lobbyBtn);
+
     document.body.appendChild(container);
     this.resultsContainer = container;
   }

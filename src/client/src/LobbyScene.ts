@@ -16,7 +16,7 @@ const PIXELLAB_DIR_MAP: Record<string, { sheetSuffix: string }> = {
 };
 
 const MOVE_SPEED = 180;
-const CHAR_KEY = 'male';
+const DEFAULT_CHAR_KEY = 'male';
 const INTERACT_DIST = 100;
 
 export class LobbyScene extends Phaser.Scene {
@@ -36,7 +36,9 @@ export class LobbyScene extends Phaser.Scene {
   private ePrompt!: Phaser.GameObjects.Text;
 
   private groundBounds = { left: 0, right: 0, top: 0, bottom: 0 };
-  private profileHud: HTMLDivElement | null = null;
+  private charKey = DEFAULT_CHAR_KEY;
+  private profilePanel: HTMLDivElement | null = null;
+  private profileBtn: HTMLButtonElement | null = null;
   private queueOverlay: HTMLDivElement | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private queueRoom: any = null;
@@ -106,11 +108,11 @@ export class LobbyScene extends Phaser.Scene {
     // Player
     this.playerX = width / 3;
     this.playerY = height / 2;
-    this.player = this.add.sprite(this.playerX, this.playerY, `${CHAR_KEY}_south-east`)
+    this.player = this.add.sprite(this.playerX, this.playerY, `${this.charKey}_south-east`)
       .setScale(0.75)
       .setOrigin(0.5, 0.85)
       .setDepth(10);
-    this.player.play(`${CHAR_KEY}_idle_SD`);
+    this.player.play(`${this.charKey}_idle_SD`);
 
     // Player name label
     const myName = this.authState?.username ?? 'Player';
@@ -158,9 +160,10 @@ export class LobbyScene extends Phaser.Scene {
       fontSize: '12px', fontFamily: 'monospace', color: '#555',
     }).setScrollFactor(0).setDepth(100);
 
-    // Profile HUD
+    // Load equipped character from server and create profile button
     const authId = this.authState?.session?.user?.id;
-    if (authId) this.createProfileHud(authId).catch(() => {});
+    if (authId) this.loadEquippedChar(authId).catch(() => {});
+    this.createProfileButton();
 
     // Cleanup
     this.events.on('shutdown', () => this.cleanupScene());
@@ -195,13 +198,13 @@ export class LobbyScene extends Phaser.Scene {
       this.player.setPosition(this.playerX, this.playerY);
 
       const dir = this.resolveDir(w, a, s, d);
-      const walkKey = `${CHAR_KEY}_walk_${dir}`;
+      const walkKey = `${this.charKey}_walk_${dir}`;
       if (dir !== this.playerFacing || !this.player.anims.isPlaying || this.player.anims.currentAnim?.key.includes('idle')) {
         this.playerFacing = dir;
         this.player.play(walkKey, true);
       }
     } else {
-      const idleKey = `${CHAR_KEY}_idle_${this.playerFacing}`;
+      const idleKey = `${this.charKey}_idle_${this.playerFacing}`;
       if (!this.player.anims.currentAnim?.key.includes('idle')) {
         this.player.play(idleKey, true);
       }
@@ -316,7 +319,7 @@ export class LobbyScene extends Phaser.Scene {
     const client = new Client(wsUrl);
 
     const playerName = this.authState?.username ?? 'Player';
-    this.lobbyRoom = await client.joinOrCreate('lobby', { playerName, charKey: CHAR_KEY });
+    this.lobbyRoom = await client.joinOrCreate('lobby', { playerName, charKey: this.charKey });
 
     this.lobbyRoom.onMessage('lobbyState', (data: { players: { sessionId: string; playerName: string; x: number; y: number; facing: string; moving: boolean; charKey: string }[] }) => {
       const myId = this.lobbyRoom?.sessionId;
@@ -501,7 +504,8 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private cleanupScene(): void {
-    if (this.profileHud) { this.profileHud.remove(); this.profileHud = null; }
+    if (this.profilePanel) { this.profilePanel.remove(); this.profilePanel = null; }
+    if (this.profileBtn) { this.profileBtn.remove(); this.profileBtn = null; }
     this.destroyQueueUI();
     if (this.queueRoom) { this.queueRoom.leave(); this.queueRoom = null; }
     if (this.lobbyRoom) { this.lobbyRoom.leave(); this.lobbyRoom = null; }
@@ -512,34 +516,305 @@ export class LobbyScene extends Phaser.Scene {
     this.otherPlayers.clear();
   }
 
-  private async createProfileHud(authId: string): Promise<void> {
-    try {
-      const protocol = window.location.protocol;
-      const host = window.location.hostname;
-      const port = window.location.port || (protocol === 'https:' ? '443' : '80');
-      const apiPort = (port === '8080' || port === '5173') ? '3000' : port;
-      const resp = await fetch(`${protocol}//${host}:${apiPort}/api/player/${authId}`);
-      if (!resp.ok) return;
-      const player = await resp.json();
-      this.renderProfileHud(player);
-    } catch { /* skip */ }
+  /** Build the API base URL for REST calls. */
+  private apiBase(): string {
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+    const apiPort = (port === '8080' || port === '5173') ? '3000' : port;
+    return `${protocol}//${host}:${apiPort}`;
   }
 
-  private renderProfileHud(player: { username: string; level: number; xp: number; coins: number }): void {
-    if (this.profileHud) this.profileHud.remove();
-    const hud = document.createElement('div');
-    hud.id = 'profile-hud';
-    hud.style.cssText = `
+  /** Load the player's equipped character from the server on scene start. */
+  private async loadEquippedChar(authId: string): Promise<void> {
+    try {
+      const resp = await fetch(`${this.apiBase()}/api/player/${authId}/equipped-char`);
+      if (!resp.ok) return;
+      const { charKey } = await resp.json();
+      if (charKey && PL_CHAR_KEYS.includes(charKey)) {
+        this.charKey = charKey;
+        // Update the player sprite to use the loaded character
+        this.player.play(`${this.charKey}_idle_${this.playerFacing}`, true);
+      }
+    } catch { /* DB not available, use default */ }
+  }
+
+  /** Persist character selection to the server and notify the lobby room. */
+  private async equipCharOnServer(charKey: string): Promise<boolean> {
+    const authId = this.authState?.session?.user?.id;
+    if (!authId) return false;
+    try {
+      const resp = await fetch(`${this.apiBase()}/api/player/${authId}/equip-char`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ charKey }),
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Switch the local player's character and broadcast the change. */
+  private switchCharacter(charKey: string): void {
+    if (charKey === this.charKey) return;
+    this.charKey = charKey;
+
+    // Update local sprite animation
+    this.player.play(`${this.charKey}_idle_${this.playerFacing}`, true);
+
+    // Tell the lobby room so other players see the change
+    if (this.lobbyRoom) {
+      this.lobbyRoom.send('changeChar', { charKey });
+    }
+
+    // Persist to DB (fire-and-forget)
+    this.equipCharOnServer(charKey);
+  }
+
+  /** Create the small Profile button in the top-right corner. */
+  private createProfileButton(): void {
+    if (this.profileBtn) return;
+    const btn = document.createElement('button');
+    btn.id = 'profile-btn';
+    btn.textContent = 'Profile';
+    btn.style.cssText = `
       position: fixed; top: 10px; right: 10px; z-index: 5000;
-      background: rgba(0,0,0,0.7); border: 1px solid #444; border-radius: 6px;
-      padding: 8px 14px; font-family: monospace; color: #eee; font-size: 13px;
-      pointer-events: none;
+      background: rgba(0,0,0,0.75); border: 1px solid #555; border-radius: 6px;
+      padding: 8px 18px; font-family: monospace; color: #ffdd44; font-size: 14px;
+      font-weight: bold; cursor: pointer;
     `;
-    hud.innerHTML = `
-      <div style="font-weight: bold; color: #ffdd44; margin-bottom: 4px;">Lv.${player.level} ${player.username}</div>
-      <div style="font-size: 11px; color: #aaa;">XP: ${player.xp} &nbsp; Coins: ${player.coins}</div>
+    btn.onmouseenter = () => { btn.style.borderColor = '#ffdd44'; };
+    btn.onmouseleave = () => { btn.style.borderColor = '#555'; };
+    btn.onclick = () => this.toggleProfilePanel();
+    document.body.appendChild(btn);
+    this.profileBtn = btn;
+  }
+
+  /** Toggle the Profile panel open/closed. */
+  private toggleProfilePanel(): void {
+    if (this.profilePanel) {
+      this.profilePanel.remove();
+      this.profilePanel = null;
+      return;
+    }
+    this.openProfilePanel();
+  }
+
+  /** Open the Profile panel with Stats and Character tabs. */
+  private async openProfilePanel(): Promise<void> {
+    if (this.profilePanel) { this.profilePanel.remove(); this.profilePanel = null; }
+
+    const panel = document.createElement('div');
+    panel.id = 'profile-panel';
+    panel.style.cssText = `
+      position: fixed; top: 50px; right: 10px; z-index: 6000;
+      background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
+      width: 340px; font-family: monospace; color: #eee;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.6);
     `;
-    document.body.appendChild(hud);
-    this.profileHud = hud;
+
+    // Stop keyboard events from reaching Phaser
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('keyup', (e) => e.stopPropagation());
+
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.style.cssText = 'display: flex; border-bottom: 1px solid #333;';
+
+    const tabStats = document.createElement('button');
+    tabStats.textContent = 'Stats';
+    tabStats.style.cssText = this.tabStyle(true);
+
+    const tabChar = document.createElement('button');
+    tabChar.textContent = 'Character';
+    tabChar.style.cssText = this.tabStyle(false);
+
+    tabBar.appendChild(tabStats);
+    tabBar.appendChild(tabChar);
+    panel.appendChild(tabBar);
+
+    // Content area
+    const content = document.createElement('div');
+    content.id = 'profile-content';
+    content.style.cssText = 'padding: 16px;';
+    panel.appendChild(content);
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'X';
+    closeBtn.style.cssText = `
+      position: absolute; top: 6px; right: 10px; background: none;
+      border: none; color: #888; font-family: monospace; font-size: 16px;
+      cursor: pointer; font-weight: bold;
+    `;
+    closeBtn.onmouseenter = () => { closeBtn.style.color = '#fff'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.color = '#888'; };
+    closeBtn.onclick = () => { this.profilePanel?.remove(); this.profilePanel = null; };
+    panel.appendChild(closeBtn);
+
+    document.body.appendChild(panel);
+    this.profilePanel = panel;
+
+    // Tab click handlers
+    const showTab = (tab: 'stats' | 'char') => {
+      tabStats.style.cssText = this.tabStyle(tab === 'stats');
+      tabChar.style.cssText = this.tabStyle(tab === 'char');
+      if (tab === 'stats') {
+        this.renderStatsTab(content);
+      } else {
+        this.renderCharacterTab(content);
+      }
+    };
+
+    tabStats.onclick = () => showTab('stats');
+    tabChar.onclick = () => showTab('char');
+
+    // Default: show stats
+    showTab('stats');
+  }
+
+  /** Return inline CSS for a tab button. */
+  private tabStyle(active: boolean): string {
+    return `
+      flex: 1; padding: 10px; background: ${active ? '#2a2a4a' : 'transparent'};
+      border: none; color: ${active ? '#ffdd44' : '#888'}; font-family: monospace;
+      font-size: 14px; font-weight: bold; cursor: pointer;
+      border-bottom: 2px solid ${active ? '#ffdd44' : 'transparent'};
+    `;
+  }
+
+  /** Render the Stats tab content. */
+  private async renderStatsTab(container: HTMLElement): Promise<void> {
+    container.innerHTML = '<div style="color: #555; text-align: center;">Loading...</div>';
+    const authId = this.authState?.session?.user?.id;
+    if (!authId) {
+      container.innerHTML = '<div style="color: #888; text-align: center;">Not logged in</div>';
+      return;
+    }
+
+    try {
+      const username = encodeURIComponent(this.authState?.username ?? 'Player');
+      const resp = await fetch(`${this.apiBase()}/api/player/${authId}?username=${username}`);
+      if (!resp.ok) {
+        container.innerHTML = '<div style="color: #888; text-align: center;">Could not load profile</div>';
+        return;
+      }
+      const p = await resp.json();
+      container.innerHTML = `
+        <div style="text-align: center; margin-bottom: 16px;">
+          <div style="font-size: 20px; font-weight: bold; color: #ffdd44;">Lv.${p.level} ${p.username}</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+          <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
+            <div style="color: #888; font-size: 11px;">XP</div>
+            <div style="color: #4488ff; font-weight: bold;">${p.xp}</div>
+          </div>
+          <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
+            <div style="color: #888; font-size: 11px;">Coins</div>
+            <div style="color: #ffcc44; font-weight: bold;">${p.coins}</div>
+          </div>
+          <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
+            <div style="color: #888; font-size: 11px;">Races</div>
+            <div style="color: #eee; font-weight: bold;">${p.total_races ?? 0}</div>
+          </div>
+          <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
+            <div style="color: #888; font-size: 11px;">Wins</div>
+            <div style="color: #44bb44; font-weight: bold;">${p.total_wins ?? 0}</div>
+          </div>
+        </div>
+      `;
+    } catch {
+      container.innerHTML = '<div style="color: #888; text-align: center;">Could not load profile</div>';
+    }
+  }
+
+  /** Character display names for the select grid. */
+  private static readonly CHAR_LABELS: Record<string, string> = {
+    'male': 'Male Light',
+    'female': 'Female Light',
+    'male-medium': 'Male Medium',
+    'female-medium': 'Female Medium',
+    'male-dark': 'Male Dark',
+    'female-dark': 'Female Dark',
+  };
+
+  /** Render the Character Select tab content. */
+  private renderCharacterTab(container: HTMLElement): void {
+    container.innerHTML = '';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'text-align: center; margin-bottom: 12px; color: #aaa; font-size: 12px;';
+    heading.textContent = 'Select your character';
+    container.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 8px;';
+
+    for (const key of PL_CHAR_KEYS) {
+      const isSelected = key === this.charKey;
+      const card = document.createElement('button');
+      card.dataset.charKey = key;
+      card.style.cssText = `
+        background: ${isSelected ? '#2a2a4a' : '#181828'};
+        border: 2px solid ${isSelected ? '#ffdd44' : '#333'};
+        border-radius: 6px; padding: 12px 8px; cursor: pointer;
+        color: #eee; font-family: monospace; font-size: 12px;
+        text-align: center; transition: border-color 0.15s;
+      `;
+      card.onmouseenter = () => { if (key !== this.charKey) card.style.borderColor = '#666'; };
+      card.onmouseleave = () => { card.style.borderColor = key === this.charKey ? '#ffdd44' : '#333'; };
+
+      // Character preview — use a canvas to render the first idle frame
+      const preview = document.createElement('canvas');
+      preview.width = 64;
+      preview.height = 64;
+      preview.style.cssText = 'display: block; margin: 0 auto 6px; image-rendering: pixelated;';
+      this.drawCharPreview(preview, key);
+      card.appendChild(preview);
+
+      const label = document.createElement('div');
+      label.textContent = LobbyScene.CHAR_LABELS[key] ?? key;
+      label.style.cssText = `font-weight: ${isSelected ? 'bold' : 'normal'}; color: ${isSelected ? '#ffdd44' : '#ccc'};`;
+      card.appendChild(label);
+
+      if (isSelected) {
+        const badge = document.createElement('div');
+        badge.textContent = 'EQUIPPED';
+        badge.style.cssText = 'font-size: 10px; color: #44bb44; margin-top: 4px;';
+        card.appendChild(badge);
+      }
+
+      card.onclick = () => {
+        this.switchCharacter(key);
+        // Re-render tab to update selection state
+        this.renderCharacterTab(container);
+      };
+
+      grid.appendChild(card);
+    }
+
+    container.appendChild(grid);
+  }
+
+  /** Draw a small preview of a character's idle south-east frame onto a canvas. */
+  private drawCharPreview(canvas: HTMLCanvasElement, charKey: string): void {
+    try {
+      const textureKey = `${charKey}_idle_south-east`;
+      const tex = this.textures.get(textureKey);
+      if (!tex || tex.key === '__MISSING') return;
+      const frame = tex.get(0);
+      if (!frame) return;
+      const source = frame.source.image as HTMLImageElement | HTMLCanvasElement;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw first frame of the idle spritesheet, scaled to fit
+      ctx.drawImage(
+        source,
+        frame.cutX, frame.cutY, frame.cutWidth, frame.cutHeight,
+        (canvas.width - 56) / 2, (canvas.height - 56) / 2, 56, 56,
+      );
+    } catch { /* texture not loaded yet, leave blank */ }
   }
 }

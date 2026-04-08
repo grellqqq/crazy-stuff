@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS players (
   total_races INTEGER NOT NULL DEFAULT 0,
   total_wins INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  equipped_char TEXT NOT NULL DEFAULT 'male'
 );
 
 -- Inventory table — items owned by players
