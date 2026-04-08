@@ -1744,7 +1744,7 @@ export class IsoScene extends Phaser.Scene {
         }
         break;
       case RacePhase.Finished:
-        this.phaseText.setText('Race Over — Vote to Rematch!').setColor('#ff6666');
+        this.phaseText.setText('Race Over!').setColor('#ff6666');
         break;
     }
   }
@@ -1782,7 +1782,7 @@ export class IsoScene extends Phaser.Scene {
     container.appendChild(voteStatus);
 
     const btn = document.createElement('button');
-    btn.textContent = 'Rematch!';
+    btn.textContent = 'Play Again';
     btn.style.cssText = `
       margin-top: 16px; padding: 10px 32px; font-size: 16px; font-weight: bold;
       background: #44bb44; color: #fff; border: none; border-radius: 6px;
@@ -1793,11 +1793,10 @@ export class IsoScene extends Phaser.Scene {
       if (!btn.disabled) btn.style.background = '#44bb44';
     });
     btn.addEventListener('click', () => {
-      if (this.room) this.room.send('rematchVote', {});
-      btn.textContent = 'Waiting for others...';
-      btn.disabled = true;
-      btn.style.background = '#666';
-      btn.style.cursor = 'default';
+      // Leave race and rejoin queue
+      this.destroyResultsContainer();
+      if (this.room) { this.room.leave(); this.room = null; }
+      this.scene.start('LobbyScene', { authState: this.authState, autoQueue: true });
     });
     container.appendChild(btn);
     this.rematchBtn = btn;

@@ -58,9 +58,12 @@ export class LobbyScene extends Phaser.Scene {
     super({ key: 'LobbyScene' });
   }
 
-  init(data: { authState?: AuthState; bgMusic?: Phaser.Sound.BaseSound }): void {
+  private autoQueue = false;
+
+  init(data: { authState?: AuthState; bgMusic?: Phaser.Sound.BaseSound; autoQueue?: boolean }): void {
     this.authState = data.authState ?? null;
     this.bgMusic = data.bgMusic ?? null;
+    this.autoQueue = data.autoQueue ?? false;
   }
 
   preload(): void {
@@ -124,7 +127,13 @@ export class LobbyScene extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(11);
 
     // Connect to multiplayer lobby for presence
-    this.connectLobby().catch(e => console.error('[LobbyScene] lobby connect failed:', e));
+    this.connectLobby().then(() => {
+      // Auto-open queue if returning from a race with "Play Again"
+      if (this.autoQueue) {
+        this.autoQueue = false;
+        this.enterRace();
+      }
+    }).catch(e => console.error('[LobbyScene] lobby connect failed:', e));
 
     // E prompt
     this.ePrompt = this.add.text(this.buildingX, this.buildingY - 90, '[E] Enter Race', {
