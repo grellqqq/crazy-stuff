@@ -111,12 +111,15 @@ gameServer.define('lobby', LobbyRoom);
 gameServer.define('queue', QueueRoom);
 gameServer.define('race', RaceRoom);
 
-// Connect to MongoDB then start server
+// Connect to MongoDB then start server (graceful fallback for local dev without DB)
 connectDB().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] Running on http://0.0.0.0:${PORT}`);
   });
 }).catch((e) => {
   console.error('[server] Failed to connect to MongoDB:', e);
-  process.exit(1);
+  console.warn('[server] Starting WITHOUT database — auth and persistence disabled (dev mode)');
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`[server] Running on http://0.0.0.0:${PORT} (no database)`);
+  });
 });

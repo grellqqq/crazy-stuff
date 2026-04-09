@@ -128,7 +128,6 @@ const DIR_TO_SUFFIX: Record<string, string> = {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface AvatarData {
-  container: Phaser.GameObjects.Container;
   bodySprite: Phaser.GameObjects.Sprite;
   equipmentLayers: Map<string, Phaser.GameObjects.Sprite>;
   loadout: Record<string, string>;
@@ -482,7 +481,8 @@ export class IsoScene extends Phaser.Scene {
 
     // Destroy all avatars
     for (const av of this.avatars.values()) {
-      av.container.destroy();
+      av.bodySprite.destroy();
+      for (const [, s] of av.equipmentLayers) s.destroy();
       av.shadow.destroy();
       av.label.destroy();
       av.statusLabel.destroy();
@@ -520,7 +520,8 @@ export class IsoScene extends Phaser.Scene {
       }
 
       const depth = isoDepth(av.displayX + 1, av.displayY + 1);
-      av.container.setDepth(depth);
+      av.bodySprite.setDepth(depth);
+      for (const [, s] of av.equipmentLayers) s.setDepth(depth + 0.01);
       av.label.setDepth(depth + 0.1);
       av.statusLabel.setDepth(depth + 0.15);
 
@@ -531,14 +532,18 @@ export class IsoScene extends Phaser.Scene {
     // Frozen/stuck flash
     const localAv = this.avatars.get(this.mySlotIndex);
     if (localAv && (localAv.frozen || localAv.stuck)) {
-      localAv.container.setVisible(Math.floor(_time / 500) % 2 === 0);
-      localAv.container.setAlpha(1);
+      localAv.bodySprite.setVisible(Math.floor(_time / 500) % 2 === 0);
+      localAv.bodySprite.setAlpha(1);
+      for (const [, s] of localAv.equipmentLayers) { s.setVisible(localAv.bodySprite.visible); s.setAlpha(1); }
     } else if (localAv && localAv.immune) {
-      localAv.container.setVisible(true);
-      localAv.container.setAlpha(0.5 + Math.sin(_time / 100) * 0.2); // pulsing ghost
+      localAv.bodySprite.setVisible(true);
+      const ghostAlpha = 0.5 + Math.sin(_time / 100) * 0.2;
+      localAv.bodySprite.setAlpha(ghostAlpha);
+      for (const [, s] of localAv.equipmentLayers) { s.setVisible(true); s.setAlpha(ghostAlpha); }
     } else if (localAv) {
-      localAv.container.setVisible(true);
-      localAv.container.setAlpha(1);
+      localAv.bodySprite.setVisible(true);
+      localAv.bodySprite.setAlpha(1);
+      for (const [, s] of localAv.equipmentLayers) { s.setVisible(true); s.setAlpha(1); }
     }
 
     this.updatePickupHud();
@@ -1108,7 +1113,7 @@ export class IsoScene extends Phaser.Scene {
         // TEST: give players a wizard hat to verify equipment layering
         const av = this.avatars.get(index)!;
         const charKey = SLOT_CHARACTERS[index % SLOT_CHARACTERS.length].char.key;
-        // Only apply if we have sprites for this body type (currently only 'male')
+        // TEST: give male characters a wizard hat
         if (charKey === 'male') {
           this.applyLoadout(av, { head_accessory: 'wizard_hat' }, charKey);
         }
@@ -1154,7 +1159,8 @@ export class IsoScene extends Phaser.Scene {
     } else {
       const av = this.avatars.get(index);
       if (av) {
-        av.container.destroy();
+        av.bodySprite.destroy();
+      for (const [, s] of av.equipmentLayers) s.destroy();
         av.shadow.destroy();
         av.label.destroy();
         av.statusLabel.destroy();
@@ -1177,15 +1183,12 @@ export class IsoScene extends Phaser.Scene {
       : charDef.key;
 
     const shadow = this.add.graphics();
-    const container = this.add.container(0, 0);
     const bodySprite = this.add.sprite(0, 0, initialTexture, 0);
     bodySprite.setScale(charDef.scale);
     bodySprite.setOrigin(charDef.originX, charDef.originY);
     bodySprite.setTint(config.tint);
-    container.add(bodySprite);
 
     return {
-      container,
       bodySprite,
       equipmentLayers: new Map(),
       loadout: {},
@@ -1336,15 +1339,8 @@ export class IsoScene extends Phaser.Scene {
     }
     av.equipmentLayers.clear();
 
-    // Remove bodySprite from container, rebuild in layer order
-    av.container.removeAll();
-
     for (const slot of LAYER_ORDER) {
-      if (slot === 'skin') {
-        // Body sprite always present at the skin position
-        av.container.add(av.bodySprite);
-        continue;
-      }
+      if (slot === 'skin') continue; // body sprite is always present
 
       const itemId = av.loadout[slot];
       if (!itemId) continue;
@@ -1354,21 +1350,13 @@ export class IsoScene extends Phaser.Scene {
       if (!this.textures.exists(testTexture)) continue;
 
       const equipSprite = this.add.sprite(0, 0, testTexture, 0);
-      // Scale equipment to match base character on screen: both use origin (0.5, 0.85)
-      // so feet align, but frame sizes may differ (92 vs 132)
+      // Scale equipment to match base character on screen
       const eqSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
-      const baseScale = 0.75;
-      const equipScale = baseScale * (92 / eqSize); // e.g. 0.75 * 92/132 = 0.523
+      const equipScale = 0.75 * (92 / eqSize);
       equipSprite.setScale(equipScale);
       equipSprite.setOrigin(0.5, 0.85);
       equipSprite.setData('itemId', itemId);
-      av.container.add(equipSprite);
       av.equipmentLayers.set(slot, equipSprite);
-    }
-
-    // If skin slot wasn't hit (shouldn't happen), ensure body is in container
-    if (!av.container.exists(av.bodySprite)) {
-      av.container.addAt(av.bodySprite, 0);
     }
   }
 
@@ -1384,8 +1372,12 @@ export class IsoScene extends Phaser.Scene {
     av.shadow.fillEllipse(sx, sy, 30, 12);
     av.shadow.setDepth(isoDepth(av.displayX, av.displayY) - 0.01);
 
-    // Container position — jumpOffset lifts entire avatar during jump
-    av.container.setPosition(sx, sy + av.jumpOffset);
+    // Position body sprite — jumpOffset lifts avatar during jump
+    av.bodySprite.setPosition(sx, sy + av.jumpOffset);
+    // Position equipment layers at same spot
+    for (const [, s] of av.equipmentLayers) {
+      s.setPosition(sx, sy + av.jumpOffset);
+    }
     av.label.setPosition(sx, sy - 70).setText(av.playerName || `P${av.slotIndex + 1}`);
 
     const { text, color } = this.getStatusDisplay(av);
@@ -1475,22 +1467,25 @@ export class IsoScene extends Phaser.Scene {
         equipAnimKey = this.anims.exists(specificKey) ? specificKey : `equip_${itemId}_${dir}`;
       }
 
-      if (!this.anims.exists(equipAnimKey)) continue;
+      // Resolve with deeper fallback chain: run→walk, jump→walk, idle→walk
+      if (!this.anims.exists(equipAnimKey)) {
+        // Last resort: try walk anim for this direction
+        equipAnimKey = `equip_${itemId}_${dir}`;
+      }
+      if (!this.anims.exists(equipAnimKey)) {
+        equipSprite.setAlpha(0);
+        continue;
+      }
+      equipSprite.setAlpha(1);
 
+      // Switch animation when direction or anim type changes
       const currentEquipKey = equipSprite.anims.currentAnim?.key;
-      if (currentEquipKey !== equipAnimKey || !equipSprite.anims.isPlaying) {
+      if (currentEquipKey !== equipAnimKey) {
         equipSprite.play(equipAnimKey);
       }
 
-      // Sync time scale
+      // Match body animation speed
       equipSprite.anims.timeScale = av.bodySprite.anims.timeScale;
-
-      // Force frame sync with body
-      if (bodyFrame && equipSprite.anims.currentAnim) {
-        const frames = equipSprite.anims.currentAnim.frames;
-        const idx = bodyFrame.index < frames.length ? bodyFrame.index : 0;
-        equipSprite.anims.setCurrentFrame(frames[idx]);
-      }
 
       equipSprite.setFlipX(mapping.flipX);
       equipSprite.setTint(tint);
@@ -1655,8 +1650,9 @@ export class IsoScene extends Phaser.Scene {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const port = window.location.port || (protocol === 'wss:' ? '443' : '80');
-    // In dev mode (Vite on 8080/5173), connect to server on 3000. In prod, same port.
-    const wsPort = (port === '8080' || port === '5173') ? '3000' : port;
+    // In dev mode (Vite on any local port), connect to server on 3000. In prod, same port.
+    const isDevPort = ['5173', '5174', '8080', '8081', '8082', '8083'].includes(port);
+    const wsPort = isDevPort ? '3000' : port;
     const wsUrl = `${protocol}//${host}:${wsPort}`;
     const client = new Client(wsUrl);
     const authId = this.authState?.session?.user?.id;
@@ -1816,7 +1812,7 @@ export class IsoScene extends Phaser.Scene {
       const pushSlot = this.slotBySession.get(data.sessionId);
       if (pushSlot !== undefined) {
         const av = this.avatars.get(pushSlot);
-        if (av) this.emitParticles(av.container.x, av.container.y, 0xffaa44, 6, 40);
+        if (av) this.emitParticles(av.bodySprite.x, av.bodySprite.y, 0xffaa44, 6, 40);
       }
       if (data.sessionId === this.mySessionId) this.playTone(250, 0.08, 'square', 0.06);
     });
@@ -1911,7 +1907,8 @@ export class IsoScene extends Phaser.Scene {
       const protocol = window.location.protocol;
       const host = window.location.hostname;
       const port = window.location.port || (protocol === 'https:' ? '443' : '80');
-      const apiPort = (port === '8080' || port === '5173') ? '3000' : port;
+      const apiDevPort = ['5173', '5174', '8080', '8081', '8082', '8083'].includes(port);
+      const apiPort = apiDevPort ? '3000' : port;
       const resp = await fetch(`${protocol}//${host}:${apiPort}/api/player/${authId}`);
       if (!resp.ok) return;
       const player = await resp.json();

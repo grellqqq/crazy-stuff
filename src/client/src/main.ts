@@ -3,6 +3,9 @@ import { TitleScene } from './TitleScene';
 import { LobbyScene } from './LobbyScene';
 import { IsoScene } from './IsoScene';
 
+// Dev mode: add ?dev to URL to skip login and go straight to race
+const isDevMode = new URLSearchParams(window.location.search).has('dev');
+
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: 1280,
@@ -13,7 +16,7 @@ const config: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [TitleScene, LobbyScene, IsoScene],
+  scene: isDevMode ? [IsoScene] : [TitleScene, LobbyScene, IsoScene],
 };
 
 new Phaser.Game(config);
