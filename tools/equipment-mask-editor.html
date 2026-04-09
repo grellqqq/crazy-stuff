@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Equipment Layer Mask Editor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; }
+  h1 { font-size: 18px; margin-bottom: 12px; color: #a0c4ff; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; padding: 10px; background: #16213e; border-radius: 8px; }
+  .toolbar label { font-size: 13px; color: #999; }
+  .toolbar input[type="file"] { font-size: 12px; }
+  .toolbar button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .btn-primary { background: #4a90d9; color: white; }
+  .btn-primary:hover { background: #5aa0e9; }
+  .btn-danger { background: #d94a4a; color: white; }
+  .btn-danger:hover { background: #e95a5a; }
+  .btn-success { background: #4ad97a; color: #111; }
+  .btn-success:hover { background: #5ae98a; }
+  .btn-secondary { background: #444; color: #ddd; }
+  .btn-secondary:hover { background: #555; }
+  .btn-active { outline: 2px solid #fff; outline-offset: 2px; }
+  .toolbar select { padding: 4px 8px; background: #2a2a4a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; }
+  .toolbar input[type="range"] { width: 80px; }
+  .status { font-size: 12px; color: #888; margin-bottom: 8px; min-height: 18px; }
+  .main-area { display: flex; gap: 16px; }
+  .canvas-panel { flex: 1; }
+  .canvas-panel canvas { border: 1px solid #333; cursor: crosshair; image-rendering: pixelated; display: block; }
+  .direction-nav { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+  .dir-btn { padding: 6px 14px; font-size: 13px; border: 2px solid #444; background: #2a2a4a; color: #ccc; border-radius: 4px; cursor: pointer; position: relative; }
+  .dir-btn.active { background: #4a90d9; color: white; border-color: #4a90d9; }
+  .dir-btn.has-mask { border-color: #4ad97a; }
+  .dir-btn.has-mask::after { content: ''; position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; background: #4ad97a; border-radius: 50%; }
+  .preview-panel { width: 320px; }
+  .preview-panel h3 { font-size: 14px; margin-bottom: 8px; color: #a0c4ff; }
+  .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .preview-grid canvas { border: 1px solid #333; image-rendering: pixelated; width: 100%; background: repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 16px 16px; }
+  .preview-label { font-size: 10px; color: #888; text-align: center; }
+  .instructions { font-size: 12px; color: #888; margin-top: 12px; line-height: 1.6; background: #16213e; padding: 10px; border-radius: 6px; }
+  .instructions kbd { background: #333; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  .instructions code { background: #333; padding: 1px 5px; border-radius: 3px; font-size: 11px; color: #a0c4ff; }
+  .zoom-info { font-size: 11px; color: #666; }
+  .frame-nav { display: flex; gap: 4px; margin-bottom: 6px; align-items: center; font-size: 12px; color: #999; }
+  .frame-nav button { padding: 3px 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<h1>Equipment Layer Mask Editor</h1>
+
+<div class="toolbar">
+  <div>
+    <label>Equipped spritesheet folder:</label><br>
+    <input type="file" id="fileInput" webkitdirectory multiple>
+  </div>
+  <div>
+    <label>Tool:</label><br>
+    <button id="btnBrush" class="btn-primary btn-active" onclick="setTool('brush')">Brush (LMB)</button>
+    <button id="btnEraser" class="btn-secondary" onclick="setTool('eraser')">Eraser (RMB)</button>
+  </div>
+  <div>
+    <label>Size: <span id="brushSizeLabel">8</span></label><br>
+    <input type="range" id="brushSize" min="1" max="40" value="8" oninput="updateBrushSize()">
+  </div>
+  <div>
+    <label>Zoom:</label><br>
+    <button class="btn-secondary" onclick="setZoom(zoom-1)">-</button>
+    <span id="zoomLabel" class="zoom-info">4x</span>
+    <button class="btn-secondary" onclick="setZoom(zoom+1)">+</button>
+  </div>
+  <div>
+    <button class="btn-danger" onclick="clearMask()">Clear This Dir</button>
+    <button class="btn-primary" onclick="copyMaskToAll()">Copy Mask -> All Dirs</button>
+  </div>
+  <div>
+    <button class="btn-success" onclick="exportAll()" style="padding: 10px 20px; font-size: 15px;">Export All</button>
+  </div>
+</div>
+
+<div class="direction-nav" id="dirNav"></div>
+<div class="frame-nav" id="frameNav">
+  <span>Preview frame:</span>
+  <button class="btn-secondary" onclick="prevFrame()">&lt;</button>
+  <span id="frameLabel">1 / 6</span>
+  <button class="btn-secondary" onclick="nextFrame()">&gt;</button>
+  <span style="margin-left:12px; color:#666;">(mask applies to ALL frames)</span>
+</div>
+
+<div id="statusBar" class="status">Load a folder of spritesheet strips (walk_south.png, idle_east.png, etc.)</div>
+
+<div class="main-area">
+  <div class="canvas-panel">
+    <canvas id="mainCanvas"></canvas>
+  </div>
+  <div class="preview-panel">
+    <h3>Preview (masked result)</h3>
+    <div id="previewArea" class="preview-grid"></div>
+    <div class="instructions" style="margin-top: 12px;">
+      <strong>Steps:</strong><br>
+      1. Click <strong>"Choose Files"</strong> and select the equipped character sheets folder<br>
+      2. <kbd>Left-click drag</kbd> to paint equipment area (green = keep)<br>
+      3. <kbd>Right-click drag</kbd> to erase mistakes<br>
+      4. Use <strong>"Copy Mask -> All Dirs"</strong> then fine-tune each direction<br>
+      5. Green dot on direction tabs = has mask data<br>
+      6. Click <strong>"Export All"</strong> to download overlay PNGs<br>
+      7. Move PNGs to <code>sprites/equipment/{slot}/{itemId}/male/</code>
+    </div>
+  </div>
+</div>
+
+<script>
+const DIRECTIONS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
+const DIR_SHORT = ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW'];
+
+// Core state
+let sheets = {};        // { direction: { walk: {canvas, imageData, width, height, frames}, idle: ... } }
+let masks = {};          // { direction: Uint8Array } — persistent per-direction masks
+let frameW = 0, frameH = 0;
+let currentDir = 'south';
+let currentFrame = 0;
+let tool = 'brush';
+let brushSize = 8;
+let zoom = 4;
+let painting = false;
+let lastX = -1, lastY = -1;
+
+const mainCanvas = document.getElementById('mainCanvas');
+const ctx = mainCanvas.getContext('2d');
+
+// Initialize all masks upfront
+function initAllMasks() {
+  if (frameW === 0 || frameH === 0) return;
+  for (const dir of DIRECTIONS) {
+    if (!masks[dir] || masks[dir].length !== frameW * frameH) {
+      masks[dir] = new Uint8Array(frameW * frameH);
+    }
+  }
+}
+
+// Build direction nav
+const dirNav = document.getElementById('dirNav');
+DIRECTIONS.forEach((d, i) => {
+  const btn = document.createElement('button');
+  btn.textContent = DIR_SHORT[i];
+  btn.id = `dir_${d}`;
+  btn.className = 'dir-btn';
+  btn.onclick = () => selectDirection(d);
+  if (d === currentDir) btn.classList.add('active');
+  dirNav.appendChild(btn);
+});
+
+function updateDirIndicators() {
+  DIRECTIONS.forEach(d => {
+    const btn = document.getElementById(`dir_${d}`);
+    if (!btn) return;
+    const mask = masks[d];
+    const hasMask = mask && mask.some(v => v > 0);
+    btn.classList.toggle('has-mask', hasMask);
+  });
+}
+
+// File input
+document.getElementById('fileInput').addEventListener('change', handleFiles);
+
+function handleFiles(e) {
+  const files = Array.from(e.target.files);
+  sheets = {};
+  masks = {};
+  frameW = 0;
+  frameH = 0;
+
+  const pngFiles = files.filter(f => f.name.endsWith('.png'));
+  if (pngFiles.length === 0) {
+    setStatus('No PNG files found in folder');
+    return;
+  }
+
+  let totalValid = 0;
+  let loaded = 0;
+
+  // Count valid files first
+  const validFiles = pngFiles.filter(f => {
+    const match = f.name.match(/^(walk|run|jump|idle)_(.+)\.png$/);
+    return match && DIRECTIONS.includes(match[2]);
+  });
+  totalValid = validFiles.length;
+
+  if (totalValid === 0) {
+    setStatus('No valid spritesheet files found. Expected names like walk_south.png, idle_east.png');
+    return;
+  }
+
+  validFiles.forEach(file => {
+    const match = file.name.match(/^(walk|run|jump|idle)_(.+)\.png$/);
+    const [, anim, dir] = match;
+
+    const img = new Image();
+    img.onload = () => {
+      if (!sheets[dir]) sheets[dir] = {};
+
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const cx = c.getContext('2d');
+      cx.drawImage(img, 0, 0);
+
+      const fh = img.height;
+      const fw = fh; // square frames
+      const numFrames = Math.round(img.width / fw);
+
+      sheets[dir][anim] = {
+        canvas: c,
+        imageData: cx.getImageData(0, 0, img.width, img.height),
+        width: img.width,
+        height: img.height,
+        frameW: fw,
+        frameH: fh,
+        frames: numFrames,
+      };
+
+      // Set global frame size from first loaded image
+      if (frameW === 0) {
+        frameW = fw;
+        frameH = fh;
+        initAllMasks();
+      }
+
+      loaded++;
+      setStatus(`Loading... ${loaded}/${totalValid}`);
+
+      if (loaded === totalValid) {
+        // All loaded — ensure masks exist for all directions
+        initAllMasks();
+        const firstDir = DIRECTIONS.find(d => sheets[d]) || 'south';
+        selectDirection(firstDir);
+        setStatus(`Loaded ${totalValid} sheets. Frame: ${frameW}x${frameH}px. Paint the equipment area!`);
+        updateDirIndicators();
+      }
+    };
+    img.onerror = () => {
+      loaded++;
+      if (loaded === totalValid) {
+        initAllMasks();
+        selectDirection(DIRECTIONS.find(d => sheets[d]) || 'south');
+        setStatus(`Loaded (some errors). Paint the equipment area!`);
+      }
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function selectDirection(dir) {
+  currentDir = dir;
+  currentFrame = 0;
+
+  document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`dir_${dir}`);
+  if (btn) btn.classList.add('active');
+
+  updateFrameLabel();
+  render();
+}
+
+function getMaxFrames() {
+  const dirSheets = sheets[currentDir];
+  if (!dirSheets) return 1;
+  let maxF = 1;
+  for (const s of Object.values(dirSheets)) {
+    if (s.frames > maxF) maxF = s.frames;
+  }
+  return maxF;
+}
+
+function prevFrame() {
+  const max = getMaxFrames();
+  currentFrame = (currentFrame - 1 + max) % max;
+  updateFrameLabel();
+  render();
+}
+
+function nextFrame() {
+  const max = getMaxFrames();
+  currentFrame = (currentFrame + 1) % max;
+  updateFrameLabel();
+  render();
+}
+
+function updateFrameLabel() {
+  document.getElementById('frameLabel').textContent = `${currentFrame + 1} / ${getMaxFrames()}`;
+}
+
+function render() {
+  if (frameW === 0) return;
+
+  // Find first available anim for display
+  const dirSheets = sheets[currentDir];
+  let sheet = null;
+  if (dirSheets) {
+    sheet = dirSheets.walk || dirSheets.idle || dirSheets.run || dirSheets.jump || Object.values(dirSheets)[0];
+  }
+
+  const displayW = frameW * zoom;
+  const displayH = frameH * zoom;
+  mainCanvas.width = displayW;
+  mainCanvas.height = displayH;
+  ctx.imageSmoothingEnabled = false;
+
+  // Checkerboard background
+  for (let y = 0; y < displayH; y += 16) {
+    for (let x = 0; x < displayW; x += 16) {
+      ctx.fillStyle = ((x + y) / 16) % 2 === 0 ? '#2a2a2a' : '#222';
+      ctx.fillRect(x, y, 16, 16);
+    }
+  }
+
+  if (!sheet) {
+    ctx.fillStyle = '#888';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('No sheet for this direction', 20, displayH / 2);
+    return;
+  }
+
+  // Draw the current frame
+  const frameIdx = Math.min(currentFrame, sheet.frames - 1);
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = frameW;
+  tempCanvas.height = frameH;
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.drawImage(sheet.canvas, frameIdx * sheet.frameW, 0, sheet.frameW, sheet.frameH, 0, 0, frameW, frameH);
+  ctx.drawImage(tempCanvas, 0, 0, frameW, frameH, 0, 0, displayW, displayH);
+
+  // Draw mask overlay
+  const mask = masks[currentDir];
+  if (mask) {
+    for (let y = 0; y < frameH; y++) {
+      for (let x = 0; x < frameW; x++) {
+        if (mask[y * frameW + x]) {
+          ctx.fillStyle = 'rgba(0, 255, 100, 0.35)';
+          ctx.fillRect(x * zoom, y * zoom, zoom, zoom);
+          // Green border on mask pixels for clarity
+          ctx.strokeStyle = 'rgba(0, 255, 100, 0.15)';
+          ctx.strokeRect(x * zoom, y * zoom, zoom, zoom);
+        }
+      }
+    }
+  }
+
+  updatePreview();
+}
+
+function updatePreview() {
+  const area = document.getElementById('previewArea');
+  area.innerHTML = '';
+
+  const dirSheets = sheets[currentDir];
+  if (!dirSheets) return;
+  const mask = masks[currentDir];
+  if (!mask) return;
+
+  for (const [anim, sheet] of Object.entries(dirSheets)) {
+    const frameIdx = Math.min(currentFrame, sheet.frames - 1);
+
+    // Overlay preview
+    const c = document.createElement('canvas');
+    c.width = frameW;
+    c.height = frameH;
+    const cx = c.getContext('2d');
+    const outData = cx.createImageData(frameW, frameH);
+    const srcData = sheet.imageData;
+
+    for (let y = 0; y < frameH; y++) {
+      for (let x = 0; x < frameW; x++) {
+        const mi = y * frameW + x;
+        if (!mask[mi]) continue;
+
+        const srcX = frameIdx * sheet.frameW + x;
+        if (srcX >= srcData.width) continue;
+        const si = (y * srcData.width + srcX) * 4;
+        const oi = mi * 4;
+
+        if (srcData.data[si + 3] > 0) {
+          outData.data[oi]     = srcData.data[si];
+          outData.data[oi + 1] = srcData.data[si + 1];
+          outData.data[oi + 2] = srcData.data[si + 2];
+          outData.data[oi + 3] = srcData.data[si + 3];
+        }
+      }
+    }
+
+    cx.putImageData(outData, 0, 0);
+
+    const wrapper = document.createElement('div');
+    const label = document.createElement('div');
+    label.className = 'preview-label';
+    label.textContent = `${anim} f${frameIdx + 1}`;
+    wrapper.appendChild(c);
+    wrapper.appendChild(label);
+    area.appendChild(wrapper);
+  }
+}
+
+// ─── Drawing ────────────────────────────────────────────────────────────
+
+mainCanvas.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  painting = true;
+  lastX = -1;
+  lastY = -1;
+  const isErase = e.button === 2 || tool === 'eraser';
+  paint(e, isErase);
+});
+
+mainCanvas.addEventListener('mousemove', (e) => {
+  if (!painting) return;
+  const isErase = (e.buttons & 2) !== 0 || tool === 'eraser';
+  paint(e, isErase);
+});
+
+mainCanvas.addEventListener('mouseup', () => {
+  painting = false;
+  lastX = -1;
+  lastY = -1;
+  updateDirIndicators();
+});
+
+mainCanvas.addEventListener('mouseleave', () => {
+  painting = false;
+  lastX = -1;
+  lastY = -1;
+});
+
+mainCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function paint(e, erase) {
+  const mask = masks[currentDir];
+  if (!mask) {
+    console.warn('No mask for direction:', currentDir);
+    return;
+  }
+
+  const rect = mainCanvas.getBoundingClientRect();
+  const px = Math.floor((e.clientX - rect.left) / zoom);
+  const py = Math.floor((e.clientY - rect.top) / zoom);
+  const r = Math.floor(brushSize / 2);
+
+  // Line from last point for smooth strokes
+  if (lastX >= 0 && lastY >= 0) {
+    const points = bresenham(lastX, lastY, px, py);
+    for (const [bx, by] of points) {
+      paintCircle(mask, bx, by, r, erase);
+    }
+  } else {
+    paintCircle(mask, px, py, r, erase);
+  }
+
+  lastX = px;
+  lastY = py;
+  render();
+}
+
+function bresenham(x0, y0, x1, y1) {
+  const points = [];
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let cx = x0, cy = y0;
+  while (true) {
+    points.push([cx, cy]);
+    if (cx === x1 && cy === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; cx += sx; }
+    if (e2 < dx) { err += dx; cy += sy; }
+  }
+  return points;
+}
+
+function paintCircle(mask, cx, cy, r, erase) {
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r) continue;
+      const x = cx + dx, y = cy + dy;
+      if (x < 0 || x >= frameW || y < 0 || y >= frameH) continue;
+      mask[y * frameW + x] = erase ? 0 : 1;
+    }
+  }
+}
+
+// ─── Toolbar actions ────────────────────────────────────────────────────
+
+function setTool(t) {
+  tool = t;
+  document.getElementById('btnBrush').classList.toggle('btn-active', t === 'brush');
+  document.getElementById('btnEraser').classList.toggle('btn-active', t === 'eraser');
+}
+
+function updateBrushSize() {
+  brushSize = parseInt(document.getElementById('brushSize').value);
+  document.getElementById('brushSizeLabel').textContent = brushSize;
+}
+
+function setZoom(z) {
+  zoom = Math.max(2, Math.min(10, z));
+  document.getElementById('zoomLabel').textContent = `${zoom}x`;
+  render();
+}
+
+function clearMask() {
+  if (masks[currentDir]) {
+    masks[currentDir].fill(0);
+    updateDirIndicators();
+    render();
+    setStatus(`Cleared mask for ${currentDir}`);
+  }
+}
+
+function copyMaskToAll() {
+  const src = masks[currentDir];
+  if (!src || !src.some(v => v > 0)) {
+    setStatus('Nothing to copy — paint a mask first!');
+    return;
+  }
+  let count = 0;
+  for (const dir of DIRECTIONS) {
+    if (dir === currentDir) continue;
+    if (!masks[dir]) masks[dir] = new Uint8Array(frameW * frameH);
+    masks[dir].set(src);
+    count++;
+  }
+  updateDirIndicators();
+  setStatus(`Mask copied from ${currentDir} to ${count} other directions. Click each tab to fine-tune!`);
+}
+
+// ─── Export ─────────────────────────────────────────────────────────────
+
+function exportAll() {
+  const queue = [];
+  const missedDirs = [];
+
+  for (const dir of DIRECTIONS) {
+    const dirSheets = sheets[dir];
+    const mask = masks[dir];
+    if (!dirSheets) continue;
+    if (!mask || !mask.some(v => v > 0)) {
+      missedDirs.push(dir);
+      continue;
+    }
+
+    for (const [anim, sheet] of Object.entries(dirSheets)) {
+      const numFrames = sheet.frames;
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = frameW * numFrames;
+      outCanvas.height = frameH;
+      const outCtx = outCanvas.getContext('2d');
+      const srcData = sheet.imageData;
+
+      for (let f = 0; f < numFrames; f++) {
+        const outData = outCtx.createImageData(frameW, frameH);
+
+        for (let y = 0; y < frameH; y++) {
+          for (let x = 0; x < frameW; x++) {
+            const mi = y * frameW + x;
+            if (!mask[mi]) continue;
+
+            const srcX = f * sheet.frameW + x;
+            if (srcX >= srcData.width) continue;
+            const si = (y * srcData.width + srcX) * 4;
+            const oi = (y * frameW + x) * 4;
+
+            if (srcData.data[si + 3] > 0) {
+              outData.data[oi]     = srcData.data[si];
+              outData.data[oi + 1] = srcData.data[si + 1];
+              outData.data[oi + 2] = srcData.data[si + 2];
+              outData.data[oi + 3] = srcData.data[si + 3];
+            }
+          }
+        }
+
+        outCtx.putImageData(outData, f * frameW, 0);
+      }
+
+      queue.push({ name: `${anim}_${dir}.png`, dataUrl: outCanvas.toDataURL('image/png') });
+    }
+  }
+
+  if (missedDirs.length > 0) {
+    setStatus(`WARNING: No mask for: ${missedDirs.join(', ')} — export proceeding for the rest...`);
+  }
+
+  // Download one at a time with delay to avoid browser blocking
+  let i = 0;
+  function downloadNext() {
+    if (i >= queue.length) {
+      setStatus(`Done! Exported ${queue.length} files.`);
+      return;
+    }
+    const item = queue[i];
+    const link = document.createElement('a');
+    link.download = item.name;
+    link.href = item.dataUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    i++;
+    setStatus(`Downloading ${i}/${queue.length}: ${item.name}`);
+    setTimeout(downloadNext, 300);
+  }
+  downloadNext();
+}
+
+function setStatus(msg) {
+  document.getElementById('statusBar').textContent = msg;
+}
+</script>
+</body>
+</html>

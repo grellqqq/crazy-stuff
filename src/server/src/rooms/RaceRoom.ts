@@ -1,6 +1,6 @@
 import { Room, Client } from 'colyseus';
 import { Schema, ArraySchema, type } from '@colyseus/schema';
-import { awardPostRace, getOrCreatePlayer } from '../db/mongo';
+import { awardPostRace, getOrCreatePlayer, getLoadout, getEquippedChar } from '../db/mongo';
 import {
   Terrain, generateTerrainMap, generateButtons, generatePickups,
   GRID_COL_MAX, GRID_ROW_MAX, SPAWN_X, SPAWN_Y,
@@ -173,6 +173,9 @@ export class RaceRoom extends Room<RaceState> {
   private finishCountdown = 0;
   private finishCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Equipment loadouts (cached on join, frozen during race)
+  private playerLoadouts = new Map<string, { charKey: string; loadout: Record<string, string> }>();
+
   // Rematch vote
   private rematchVotes = new Set<string>();
   private rematchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -248,6 +251,14 @@ export class RaceRoom extends Room<RaceState> {
 
     console.log(`[RaceRoom] joined: ${client.sessionId} as "${slot.playerName}" in slot ${idx}`);
     this.broadcastState();
+
+    // Fetch and broadcast equipment loadout (async, non-blocking)
+    if (options?.authId) {
+      this.fetchAndBroadcastLoadout(client.sessionId, options.authId, idx).catch(
+        e => console.error('[RaceRoom] loadout fetch error:', e)
+      );
+    }
+
     this.checkStartCondition();
   }
 
@@ -265,6 +276,7 @@ export class RaceRoom extends Room<RaceState> {
     this.clearPlayerTimers(client.sessionId);
     this.players.delete(client.sessionId);
     this.lastDirection.delete(client.sessionId);
+    this.playerLoadouts.delete(client.sessionId);
 
     console.log(`[RaceRoom] left: ${client.sessionId} freed slot ${idx}`);
     this.broadcastState();
@@ -1048,6 +1060,27 @@ export class RaceRoom extends Room<RaceState> {
   }
 
   // ─── State broadcast ──────────────────────────────────────────────────
+
+  /** Fetch a player's loadout from DB and broadcast to all clients. */
+  private async fetchAndBroadcastLoadout(sessionId: string, authId: string, slotIndex: number): Promise<void> {
+    const [charKey, loadout] = await Promise.all([
+      getEquippedChar(authId),
+      getLoadout(authId),
+    ]);
+    this.playerLoadouts.set(sessionId, { charKey, loadout });
+    // Send this player's loadout to all clients
+    this.broadcast('playerLoadout', { slotIndex, charKey, loadout });
+    // Send all existing loadouts to the new client
+    const client = this.clients.find(c => c.sessionId === sessionId);
+    if (client) {
+      for (const [sid, data] of this.playerLoadouts) {
+        const slot = this.state.slots.findIndex(s => s.sessionId === sid);
+        if (slot >= 0 && sid !== sessionId) {
+          client.send('playerLoadout', { slotIndex: slot, charKey: data.charKey, loadout: data.loadout });
+        }
+      }
+    }
+  }
 
   private broadcastState(): void {
     const now = Date.now();

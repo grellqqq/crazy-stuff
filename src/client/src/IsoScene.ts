@@ -98,10 +98,35 @@ export function isoDepth(tileX: number, tileY: number): number {
   return tileX + tileY;
 }
 
+// ─── Equipment layer order (bottom to top within container) ─────────────────
+
+const LAYER_ORDER = [
+  'back', 'lower_body', 'feet', 'skin', 'upper_body', 'hair',
+  'mouth_accessory', 'eyes_accessory', 'face_accessory',
+  'head_accessory', 'hand_1h', 'air_space',
+] as const;
+
+/** PixelLab direction suffixes (reused for equipment texture keys). */
+const PL_DIRS_LIST = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
+
+/** Equipment frame sizes — items generated at different canvas sizes than base characters. */
+const EQUIP_FRAME_SIZES: Record<string, number> = {
+  wizard_hat: 132,
+};
+
+/** Direction key → PixelLab suffix lookup (e.g. 'S' → 'south'). */
+const DIR_TO_SUFFIX: Record<string, string> = {
+  S: 'south', SA: 'south-west', A: 'west', WA: 'north-west',
+  W: 'north', WD: 'north-east', D: 'east', SD: 'south-east',
+};
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface AvatarData {
-  sprite: Phaser.GameObjects.Sprite;
+  container: Phaser.GameObjects.Container;
+  bodySprite: Phaser.GameObjects.Sprite;
+  equipmentLayers: Map<string, Phaser.GameObjects.Sprite>;
+  loadout: Record<string, string>;
   shadow: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
   statusLabel: Phaser.GameObjects.Text;
@@ -452,7 +477,7 @@ export class IsoScene extends Phaser.Scene {
 
     // Destroy all avatars
     for (const av of this.avatars.values()) {
-      av.sprite.destroy();
+      av.container.destroy();
       av.shadow.destroy();
       av.label.destroy();
       av.statusLabel.destroy();
@@ -490,7 +515,7 @@ export class IsoScene extends Phaser.Scene {
       }
 
       const depth = isoDepth(av.displayX + 1, av.displayY + 1);
-      av.sprite.setDepth(depth);
+      av.container.setDepth(depth);
       av.label.setDepth(depth + 0.1);
       av.statusLabel.setDepth(depth + 0.15);
 
@@ -501,14 +526,14 @@ export class IsoScene extends Phaser.Scene {
     // Frozen/stuck flash
     const localAv = this.avatars.get(this.mySlotIndex);
     if (localAv && (localAv.frozen || localAv.stuck)) {
-      localAv.sprite.setVisible(Math.floor(_time / 500) % 2 === 0);
-      localAv.sprite.setAlpha(1);
+      localAv.container.setVisible(Math.floor(_time / 500) % 2 === 0);
+      localAv.container.setAlpha(1);
     } else if (localAv && localAv.immune) {
-      localAv.sprite.setVisible(true);
-      localAv.sprite.setAlpha(0.5 + Math.sin(_time / 100) * 0.2); // pulsing ghost
+      localAv.container.setVisible(true);
+      localAv.container.setAlpha(0.5 + Math.sin(_time / 100) * 0.2); // pulsing ghost
     } else if (localAv) {
-      localAv.sprite.setVisible(true);
-      localAv.sprite.setAlpha(1);
+      localAv.container.setVisible(true);
+      localAv.container.setAlpha(1);
     }
 
     this.updatePickupHud();
@@ -1073,7 +1098,13 @@ export class IsoScene extends Phaser.Scene {
   private handleSlotChange(slot: any, index: number): void {
     if (slot.occupied) {
       const isNew = !this.avatars.has(index);
-      if (isNew) this.avatars.set(index, this.createAvatar(index));
+      if (isNew) {
+        this.avatars.set(index, this.createAvatar(index));
+        // TEST: give every player a wizard hat to verify equipment layering
+        const av = this.avatars.get(index)!;
+        const charKey = SLOT_CHARACTERS[index % SLOT_CHARACTERS.length].char.key;
+        this.applyLoadout(av, { head_accessory: 'wizard_hat' }, charKey);
+      }
       if (slot.sessionId === this.mySessionId) this.mySlotIndex = index;
       if (slot.sessionId) this.slotBySession.set(slot.sessionId, index);
 
@@ -1115,7 +1146,7 @@ export class IsoScene extends Phaser.Scene {
     } else {
       const av = this.avatars.get(index);
       if (av) {
-        av.sprite.destroy();
+        av.container.destroy();
         av.shadow.destroy();
         av.label.destroy();
         av.statusLabel.destroy();
@@ -1138,12 +1169,18 @@ export class IsoScene extends Phaser.Scene {
       : charDef.key;
 
     const shadow = this.add.graphics();
-    const sprite = this.add.sprite(0, 0, initialTexture, 0);
-    sprite.setScale(charDef.scale);
-    sprite.setTint(config.tint);
+    const container = this.add.container(0, 0);
+    const bodySprite = this.add.sprite(0, 0, initialTexture, 0);
+    bodySprite.setScale(charDef.scale);
+    bodySprite.setOrigin(charDef.originX, charDef.originY);
+    bodySprite.setTint(config.tint);
+    container.add(bodySprite);
 
     return {
-      sprite,
+      container,
+      bodySprite,
+      equipmentLayers: new Map(),
+      loadout: {},
       shadow,
       label: this.add.text(0, 0, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 1),
       statusLabel: this.add.text(0, 0, '', {
@@ -1161,6 +1198,161 @@ export class IsoScene extends Phaser.Scene {
     };
   }
 
+  // ─── Equipment layer management ──────────────────────────────────────────
+
+  /** Set of equipment item IDs whose spritesheets are loaded or loading. */
+  private loadedEquipment = new Set<string>();
+  /** Set of equipment item IDs currently being loaded (pending). */
+  private loadingEquipment = new Set<string>();
+
+  /**
+   * Apply a loadout to an avatar — loads missing spritesheets, then rebuilds layers.
+   * @param av The avatar to update
+   * @param loadout Slot → itemId mapping (e.g. { head_accessory: 'wizard_hat' })
+   * @param charKey Base character key (e.g. 'male', 'female-dark')
+   */
+  private applyLoadout(av: AvatarData, loadout: Record<string, string>, charKey: string): void {
+    av.loadout = { ...loadout };
+
+    // Collect items that need loading
+    const toLoad: string[] = [];
+    for (const itemId of Object.values(loadout)) {
+      if (!this.loadedEquipment.has(itemId) && !this.loadingEquipment.has(itemId)) {
+        toLoad.push(itemId);
+      }
+    }
+
+    if (toLoad.length === 0) {
+      // All textures ready — rebuild immediately
+      this.rebuildEquipmentLayers(av, charKey);
+      return;
+    }
+
+    // Queue spritesheets for loading
+    for (const itemId of toLoad) {
+      this.loadingEquipment.add(itemId);
+      const slot = Object.entries(loadout).find(([, id]) => id === itemId)?.[0];
+      if (!slot) continue;
+      // Equipment frame size — may differ from base character (e.g. 132 for PixelLab-generated overlays)
+      const eqFrameSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
+      for (const dir of PL_DIRS_LIST) {
+        const basePath = `/sprites/equipment/${slot}/${itemId}/${charKey}`;
+        this.load.spritesheet(`equip_${itemId}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        this.load.spritesheet(`equip_${itemId}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        this.load.spritesheet(`equip_${itemId}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        this.load.spritesheet(`equip_${itemId}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+      }
+    }
+
+    this.load.once('complete', () => {
+      for (const itemId of toLoad) {
+        this.loadingEquipment.delete(itemId);
+        this.loadedEquipment.add(itemId);
+        this.registerEquipmentAnims(itemId);
+      }
+      // Rebuild if avatar still exists
+      if (this.avatars.has(av.slotIndex)) {
+        this.rebuildEquipmentLayers(av, charKey);
+      }
+    });
+    this.load.start();
+  }
+
+  /** Register Phaser animations for a loaded equipment item. */
+  private registerEquipmentAnims(itemId: string): void {
+    const allDirs = ['S', 'SA', 'A', 'WA', 'W', 'WD', 'D', 'SD'];
+    for (const dir of allDirs) {
+      const suffix = DIR_TO_SUFFIX[dir];
+      // Walk
+      const walkKey = `equip_${itemId}_${dir}`;
+      const walkTexture = `equip_${itemId}_${suffix}`;
+      if (this.textures.exists(walkTexture) && !this.anims.exists(walkKey)) {
+        this.anims.create({
+          key: walkKey,
+          frames: this.anims.generateFrameNumbers(walkTexture, { start: 0, end: 5 }),
+          frameRate: 10, repeat: -1,
+        });
+      }
+      // Run
+      const runKey = `equip_${itemId}_run_${dir}`;
+      const runTexture = `equip_${itemId}_run_${suffix}`;
+      if (this.textures.exists(runTexture) && !this.anims.exists(runKey)) {
+        this.anims.create({
+          key: runKey,
+          frames: this.anims.generateFrameNumbers(runTexture, { start: 0, end: 5 }),
+          frameRate: 12, repeat: -1,
+        });
+      }
+      // Jump
+      const jumpKey = `equip_${itemId}_jump_${dir}`;
+      const jumpTexture = `equip_${itemId}_jump_${suffix}`;
+      if (this.textures.exists(jumpTexture) && !this.anims.exists(jumpKey)) {
+        this.anims.create({
+          key: jumpKey,
+          frames: this.anims.generateFrameNumbers(jumpTexture, { start: 0, end: 8 }),
+          frameRate: 16, repeat: 0,
+        });
+      }
+      // Idle
+      const idleKey = `equip_${itemId}_idle_${dir}`;
+      const idleTexture = `equip_${itemId}_idle_${suffix}`;
+      if (this.textures.exists(idleTexture) && !this.anims.exists(idleKey)) {
+        this.anims.create({
+          key: idleKey,
+          frames: this.anims.generateFrameNumbers(idleTexture, { start: 0, end: 3 }),
+          frameRate: 4, repeat: -1,
+        });
+      }
+    }
+  }
+
+  /**
+   * Destroy existing equipment sprites and rebuild from loadout in correct layer order.
+   * Body sprite is always at the 'skin' position in the stack.
+   */
+  private rebuildEquipmentLayers(av: AvatarData, charKey: string): void {
+    // Destroy old equipment sprites
+    for (const [, sprite] of av.equipmentLayers) {
+      sprite.destroy();
+    }
+    av.equipmentLayers.clear();
+
+    // Remove bodySprite from container, rebuild in layer order
+    av.container.removeAll();
+
+    for (const slot of LAYER_ORDER) {
+      if (slot === 'skin') {
+        // Body sprite always present at the skin position
+        av.container.add(av.bodySprite);
+        continue;
+      }
+
+      const itemId = av.loadout[slot];
+      if (!itemId) continue;
+
+      // Check if walk texture exists for this item (minimum requirement)
+      const testTexture = `equip_${itemId}_south`;
+      if (!this.textures.exists(testTexture)) continue;
+
+      const equipSprite = this.add.sprite(0, 0, testTexture, 0);
+      // Scale equipment to match base character on screen: both use origin (0.5, 0.85)
+      // so feet align, but frame sizes may differ (92 vs 132)
+      const eqSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
+      const baseScale = 0.75;
+      const equipScale = baseScale * (92 / eqSize); // e.g. 0.75 * 92/132 = 0.523
+      equipSprite.setScale(equipScale);
+      equipSprite.setOrigin(0.5, 0.85);
+      equipSprite.setData('itemId', itemId);
+      av.container.add(equipSprite);
+      av.equipmentLayers.set(slot, equipSprite);
+    }
+
+    // If skin slot wasn't hit (shouldn't happen), ensure body is in container
+    if (!av.container.exists(av.bodySprite)) {
+      av.container.addAt(av.bodySprite, 0);
+    }
+  }
+
   /** Position the sprite and labels at the lerped display position. */
   private positionAvatar(av: AvatarData): void {
     const { x, y } = tileToScreen(av.displayX, av.displayY);
@@ -1173,10 +1365,8 @@ export class IsoScene extends Phaser.Scene {
     av.shadow.fillEllipse(sx, sy, 30, 12);
     av.shadow.setDepth(isoDepth(av.displayX, av.displayY) - 0.01);
 
-    // Sprite origin per character type — jumpOffset lifts sprite during jump
-    const charDef = SLOT_CHARACTERS[av.slotIndex % SLOT_CHARACTERS.length].char;
-    av.sprite.setOrigin(charDef.originX, charDef.originY);
-    av.sprite.setPosition(sx, sy + av.jumpOffset);
+    // Container position — jumpOffset lifts entire avatar during jump
+    av.container.setPosition(sx, sy + av.jumpOffset);
     av.label.setPosition(sx, sy - 70).setText(av.playerName || `P${av.slotIndex + 1}`);
 
     const { text, color } = this.getStatusDisplay(av);
@@ -1212,26 +1402,26 @@ export class IsoScene extends Phaser.Scene {
 
     if (isMoving || isJumping) {
       // Always force-play the correct direction animation (handles rapid direction switches)
-      const currentKey = av.sprite.anims.currentAnim?.key;
-      if (currentKey !== animKey || !av.sprite.anims.isPlaying) {
-        av.sprite.play(animKey);
+      const currentKey = av.bodySprite.anims.currentAnim?.key;
+      if (currentKey !== animKey || !av.bodySprite.anims.isPlaying) {
+        av.bodySprite.play(animKey);
       }
       // Animation speed: slower on slow tiles
       if (av.currentTerrain === Terrain.Slow) {
-        av.sprite.anims.timeScale = 0.5;
+        av.bodySprite.anims.timeScale = 0.5;
       } else {
-        av.sprite.anims.timeScale = 1.0;
+        av.bodySprite.anims.timeScale = 1.0;
       }
     } else {
       // Idle — play breathing idle animation
       const idleKey = `${charDef.key}_idle_${dir}`;
-      const currentKey = av.sprite.anims.currentAnim?.key;
-      if (currentKey !== idleKey || !av.sprite.anims.isPlaying) {
-        av.sprite.play(idleKey);
+      const currentKey = av.bodySprite.anims.currentAnim?.key;
+      if (currentKey !== idleKey || !av.bodySprite.anims.isPlaying) {
+        av.bodySprite.play(idleKey);
       }
     }
 
-    av.sprite.setFlipX(mapping.flipX);
+    av.bodySprite.setFlipX(mapping.flipX);
 
     // Tint based on state — override slot color during effects
     let tint = config.tint;
@@ -1241,7 +1431,51 @@ export class IsoScene extends Phaser.Scene {
       else if (av.shieldActive)             tint = 0x44ffff;
       else if (av.penalized || av.knockbackSlowed) tint = 0x88ccff;
     }
-    av.sprite.setTint(tint);
+    av.bodySprite.setTint(tint);
+
+    // ── Sync equipment layers ──
+    // Determine which anim type the body is playing
+    let equipAnimType: string;
+    if (isJumping) equipAnimType = 'jump';
+    else if (isMoving && (av.sprinting || av.speedBoosted)) equipAnimType = 'run';
+    else if (isMoving) equipAnimType = 'walk';
+    else equipAnimType = 'idle';
+
+    const bodyFrame = av.bodySprite.anims.currentFrame;
+
+    for (const [, equipSprite] of av.equipmentLayers) {
+      const itemId = equipSprite.getData('itemId') as string | undefined;
+      if (!itemId) continue;
+
+      // Resolve equipment animation key with fallbacks
+      let equipAnimKey: string;
+      if (equipAnimType === 'walk') {
+        equipAnimKey = `equip_${itemId}_${dir}`;
+      } else {
+        const specificKey = `equip_${itemId}_${equipAnimType}_${dir}`;
+        equipAnimKey = this.anims.exists(specificKey) ? specificKey : `equip_${itemId}_${dir}`;
+      }
+
+      if (!this.anims.exists(equipAnimKey)) continue;
+
+      const currentEquipKey = equipSprite.anims.currentAnim?.key;
+      if (currentEquipKey !== equipAnimKey || !equipSprite.anims.isPlaying) {
+        equipSprite.play(equipAnimKey);
+      }
+
+      // Sync time scale
+      equipSprite.anims.timeScale = av.bodySprite.anims.timeScale;
+
+      // Force frame sync with body
+      if (bodyFrame && equipSprite.anims.currentAnim) {
+        const frames = equipSprite.anims.currentAnim.frames;
+        const idx = bodyFrame.index < frames.length ? bodyFrame.index : 0;
+        equipSprite.anims.setCurrentFrame(frames[idx]);
+      }
+
+      equipSprite.setFlipX(mapping.flipX);
+      equipSprite.setTint(tint);
+    }
   }
 
   private getStatusDisplay(av: AvatarData): { text: string; color: string } {
@@ -1438,6 +1672,13 @@ export class IsoScene extends Phaser.Scene {
       this.renderPickups();
     });
 
+    room.onMessage('playerLoadout', (data: { slotIndex: number; charKey: string; loadout: Record<string, string> }) => {
+      const av = this.avatars.get(data.slotIndex);
+      if (av) {
+        this.applyLoadout(av, data.loadout, data.charKey);
+      }
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     room.onMessage('state', (data: { phase: number; countdown: number; finishCountdown: number; startTime: number; slots: any[] }) => {
       const prevPhase = this.currentPhase;
@@ -1558,7 +1799,7 @@ export class IsoScene extends Phaser.Scene {
       const pushSlot = this.slotBySession.get(data.sessionId);
       if (pushSlot !== undefined) {
         const av = this.avatars.get(pushSlot);
-        if (av) this.emitParticles(av.sprite.x, av.sprite.y, 0xffaa44, 6, 40);
+        if (av) this.emitParticles(av.container.x, av.container.y, 0xffaa44, 6, 40);
       }
       if (data.sessionId === this.mySessionId) this.playTone(250, 0.08, 'square', 0.06);
     });

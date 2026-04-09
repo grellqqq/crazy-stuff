@@ -43,6 +43,13 @@ const STARTER_ITEMS = [
   { itemType: 'feet', itemId: 'beatup_sneakers', rarity: 'common' },
 ];
 
+/** Face accessory is mutually exclusive with eyes + mouth accessories. */
+const FACE_CONFLICTS: Record<string, string[]> = {
+  face_accessory: ['eyes_accessory', 'mouth_accessory'],
+  eyes_accessory: ['face_accessory'],
+  mouth_accessory: ['face_accessory'],
+};
+
 // ─── User functions (auth) ──────────────────────────────────────────────────
 
 export async function findUserByEmail(email: string) {
@@ -107,6 +114,7 @@ export async function getOrCreatePlayer(userId: string, username: string) {
     totalRaces: 0,
     totalWins: 0,
     equippedChar: 'male',
+    equippedLoadout: {},
     createdAt: now,
     updatedAt: now,
   });
@@ -167,6 +175,30 @@ export async function equipChar(userId: string, charKey: string): Promise<string
   return charKey;
 }
 
+// ─── Loadout functions ──────────────────────────────────────────────────────
+
+/** Get the denormalized equipped loadout for a player (slot → itemId). */
+export async function getLoadout(userId: string): Promise<Record<string, string>> {
+  const player = await db.collection('players').findOne({ userId });
+  return player?.equippedLoadout ?? {};
+}
+
+/** Recompute equippedLoadout from inventory and store on player doc. */
+async function recomputeLoadout(playerId: string, userId: string): Promise<Record<string, string>> {
+  const equipped = await db.collection('inventory')
+    .find({ playerId, equipped: true })
+    .toArray();
+  const loadout: Record<string, string> = {};
+  for (const item of equipped) {
+    loadout[item.itemType] = item.itemId;
+  }
+  await db.collection('players').updateOne(
+    { userId },
+    { $set: { equippedLoadout: loadout, updatedAt: new Date() } }
+  );
+  return loadout;
+}
+
 // ─── Inventory functions ────────────────────────────────────────────────────
 
 export async function getInventory(userId: string) {
@@ -209,17 +241,34 @@ export async function equipItem(userId: string, inventoryItemId: string) {
     { $set: { equipped: false } }
   );
 
+  // Face accessory mutual exclusion
+  const conflicts = FACE_CONFLICTS[item.itemType];
+  if (conflicts) {
+    await inv.updateMany(
+      { playerId, itemType: { $in: conflicts }, equipped: true },
+      { $set: { equipped: false } }
+    );
+  }
+
   // Equip the target
   await inv.updateOne({ _id: item._id }, { $set: { equipped: true } });
+
+  // Recompute denormalized loadout
+  await recomputeLoadout(playerId, userId);
+
   return item;
 }
 
 export async function unequipItem(userId: string, inventoryItemId: string) {
   const player = await db.collection('players').findOne({ userId });
   if (!player) return null;
+  const playerId = player._id.toString();
   const result = await db.collection('inventory').updateOne(
-    { _id: new ObjectId(inventoryItemId), playerId: player._id.toString() },
+    { _id: new ObjectId(inventoryItemId), playerId },
     { $set: { equipped: false } }
   );
+  if (result.modifiedCount > 0) {
+    await recomputeLoadout(playerId, userId);
+  }
   return result.modifiedCount > 0;
 }
