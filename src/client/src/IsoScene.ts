@@ -114,6 +114,11 @@ const EQUIP_FRAME_SIZES: Record<string, number> = {
   wizard_hat: 132,
 };
 
+/** Available animation types per equipment item (only load what exists). */
+const EQUIP_AVAILABLE_ANIMS: Record<string, string[]> = {
+  wizard_hat: ['walk', 'idle'],
+};
+
 /** Direction key → PixelLab suffix lookup (e.g. 'S' → 'south'). */
 const DIR_TO_SUFFIX: Record<string, string> = {
   S: 'south', SA: 'south-west', A: 'west', WA: 'north-west',
@@ -1100,10 +1105,13 @@ export class IsoScene extends Phaser.Scene {
       const isNew = !this.avatars.has(index);
       if (isNew) {
         this.avatars.set(index, this.createAvatar(index));
-        // TEST: give every player a wizard hat to verify equipment layering
+        // TEST: give players a wizard hat to verify equipment layering
         const av = this.avatars.get(index)!;
         const charKey = SLOT_CHARACTERS[index % SLOT_CHARACTERS.length].char.key;
-        this.applyLoadout(av, { head_accessory: 'wizard_hat' }, charKey);
+        // Only apply if we have sprites for this body type (currently only 'male')
+        if (charKey === 'male') {
+          this.applyLoadout(av, { head_accessory: 'wizard_hat' }, charKey);
+        }
       }
       if (slot.sessionId === this.mySessionId) this.mySlotIndex = index;
       if (slot.sessionId) this.slotBySession.set(slot.sessionId, index);
@@ -1235,16 +1243,26 @@ export class IsoScene extends Phaser.Scene {
       if (!slot) continue;
       // Equipment frame size — may differ from base character (e.g. 132 for PixelLab-generated overlays)
       const eqFrameSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
+      const availableAnims = EQUIP_AVAILABLE_ANIMS[itemId] ?? ['walk', 'idle'];
       for (const dir of PL_DIRS_LIST) {
         const basePath = `/sprites/equipment/${slot}/${itemId}/${charKey}`;
-        this.load.spritesheet(`equip_${itemId}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
-        this.load.spritesheet(`equip_${itemId}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
-        this.load.spritesheet(`equip_${itemId}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
-        this.load.spritesheet(`equip_${itemId}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        if (availableAnims.includes('walk'))
+          this.load.spritesheet(`equip_${itemId}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        if (availableAnims.includes('run'))
+          this.load.spritesheet(`equip_${itemId}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        if (availableAnims.includes('jump'))
+          this.load.spritesheet(`equip_${itemId}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+        if (availableAnims.includes('idle'))
+          this.load.spritesheet(`equip_${itemId}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
       }
     }
 
+    this.load.on('loaderror', (file: { key: string }) => {
+      console.warn(`[Equipment] failed to load: ${file.key}`);
+    });
+
     this.load.once('complete', () => {
+      console.log(`[Equipment] load complete for: ${toLoad.join(', ')}`);
       for (const itemId of toLoad) {
         this.loadingEquipment.delete(itemId);
         this.loadedEquipment.add(itemId);
@@ -1252,6 +1270,7 @@ export class IsoScene extends Phaser.Scene {
       }
       // Rebuild if avatar still exists
       if (this.avatars.has(av.slotIndex)) {
+        console.log(`[Equipment] rebuilding layers for slot ${av.slotIndex}`);
         this.rebuildEquipmentLayers(av, charKey);
       }
     });
