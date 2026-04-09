@@ -131,6 +131,7 @@ interface AvatarData {
   bodySprite: Phaser.GameObjects.Sprite;
   equipmentLayers: Map<string, Phaser.GameObjects.Sprite>;
   loadout: Record<string, string>;
+  charKey: string;
   shadow: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
   statusLabel: Phaser.GameObjects.Text;
@@ -451,6 +452,8 @@ export class IsoScene extends Phaser.Scene {
   private cleanupScene(): void {
     // Remove DOM elements
     if (this.profileHud) { this.profileHud.remove(); this.profileHud = null; }
+    if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
+    if (this.inventoryBtn) { this.inventoryBtn.parentElement?.remove(); this.inventoryBtn = null; }
 
     // Leave multiplayer room
     if (this.room) { this.room.leave(); this.room = null; }
@@ -1091,6 +1094,7 @@ export class IsoScene extends Phaser.Scene {
     kb.on('keydown-SPACE', () => {
       if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('jump');
     });
+    kb.on('keydown-I', () => this.toggleInventory());
   }
 
   private sendMove(direction: string): void {
@@ -1110,13 +1114,6 @@ export class IsoScene extends Phaser.Scene {
       const isNew = !this.avatars.has(index);
       if (isNew) {
         this.avatars.set(index, this.createAvatar(index));
-        // TEST: give players a wizard hat to verify equipment layering
-        const av = this.avatars.get(index)!;
-        const charKey = SLOT_CHARACTERS[index % SLOT_CHARACTERS.length].char.key;
-        // TEST: give male characters a wizard hat
-        if (charKey === 'male') {
-          this.applyLoadout(av, { head_accessory: 'wizard_hat' }, charKey);
-        }
       }
       if (slot.sessionId === this.mySessionId) this.mySlotIndex = index;
       if (slot.sessionId) this.slotBySession.set(slot.sessionId, index);
@@ -1192,6 +1189,7 @@ export class IsoScene extends Phaser.Scene {
       bodySprite,
       equipmentLayers: new Map(),
       loadout: {},
+      charKey: charDef.key,
       shadow,
       label: this.add.text(0, 0, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 1),
       statusLabel: this.add.text(0, 0, '', {
@@ -1688,8 +1686,10 @@ export class IsoScene extends Phaser.Scene {
     });
 
     room.onMessage('playerLoadout', (data: { slotIndex: number; charKey: string; loadout: Record<string, string> }) => {
-      // TODO: re-enable once items have sprites — currently only wizard_hat test has sprites
-      console.log('[Equipment] received server loadout for slot', data.slotIndex, data.loadout);
+      const av = this.avatars.get(data.slotIndex);
+      if (!av) return;
+      av.charKey = data.charKey;
+      this.applyLoadout(av, data.loadout, data.charKey);
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1699,6 +1699,8 @@ export class IsoScene extends Phaser.Scene {
       if (data.phase === RacePhase.Racing && prevPhase !== RacePhase.Racing) {
         this.raceStartTime = data.startTime;
         this.sfxRaceStart();
+        // Close inventory if open when race starts
+        if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
       }
       if (data.phase === RacePhase.Countdown && data.countdown > 0 && data.countdown <= 3) {
         this.sfxCountdownBeep();
@@ -1901,6 +1903,9 @@ export class IsoScene extends Phaser.Scene {
   // ─── HUD ───────────────────────────────────────────────────────────────
 
   private profileHud: HTMLDivElement | null = null;
+  private inventoryPanel: HTMLDivElement | null = null;
+  private inventoryBtn: HTMLButtonElement | null = null;
+  private inventoryPreview: HTMLCanvasElement | null = null;
 
   private async createProfileHud(authId: string): Promise<void> {
     try {
@@ -1943,12 +1948,374 @@ export class IsoScene extends Phaser.Scene {
     if (authId) await this.createProfileHud(authId);
   }
 
+  // ─── Inventory UI ──────────────────────────────────────────────────────
+
+  private apiBase(): string {
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+    const isDevPort = ['5173', '5174', '8080', '8081', '8082', '8083'].includes(port);
+    const apiPort = isDevPort ? '3000' : port;
+    return `${protocol}//${host}:${apiPort}`;
+  }
+
+  private static readonly SLOT_META: Record<string, { label: string; icon: string }> = {
+    head_accessory:  { label: 'Head',  icon: '\u{1F3A9}' },
+    hair:            { label: 'Hair',  icon: '\u{1F487}' },
+    face_accessory:  { label: 'Face',  icon: '\u{1F3AD}' },
+    eyes_accessory:  { label: 'Eyes',  icon: '\u{1F453}' },
+    mouth_accessory: { label: 'Mouth', icon: '\u{1F444}' },
+    upper_body:      { label: 'Upper', icon: '\u{1F455}' },
+    lower_body:      { label: 'Lower', icon: '\u{1F456}' },
+    feet:            { label: 'Feet',  icon: '\u{1F45F}' },
+    back:            { label: 'Back',  icon: '\u{1F392}' },
+    hand_1h:         { label: 'Hand',  icon: '\u{1F5E1}' },
+    air_space:       { label: 'Aura',  icon: '\u{2728}' },
+    skin:            { label: 'Skin',  icon: '\u{1F9EC}' },
+  };
+
+  private static readonly RARITY_COLORS: Record<string, string> = {
+    common: '#888', uncommon: '#44bb44', rare: '#4488ff',
+    epic: '#aa44ff', legendary: '#ffaa00', crazy: '#ff44ff',
+  };
+
+  private createInventoryButton(): void {
+    if (this.inventoryBtn) return;
+    const container = document.createElement('div');
+    container.id = 'iso-hud-buttons';
+    container.style.cssText = 'position: fixed; bottom: 10px; right: 10px; z-index: 5000; display: flex; gap: 8px;';
+
+    const btn = document.createElement('button');
+    btn.textContent = '\u{1F392} Inventory';
+    btn.style.cssText = `
+      background: rgba(0,0,0,0.75); border: 1px solid #555; border-radius: 6px;
+      padding: 8px 18px; font-family: monospace; font-size: 14px;
+      font-weight: bold; cursor: pointer; color: #88ccff;
+    `;
+    btn.onmouseenter = () => { btn.style.borderColor = '#88ccff'; };
+    btn.onmouseleave = () => { btn.style.borderColor = '#555'; };
+    btn.onclick = () => this.toggleInventory();
+    container.appendChild(btn);
+    this.inventoryBtn = btn;
+    document.body.appendChild(container);
+  }
+
+  private toggleInventory(): void {
+    if (this.inventoryPanel) {
+      this.inventoryPanel.remove();
+      this.inventoryPanel = null;
+      return;
+    }
+    if (this.currentPhase === RacePhase.Racing) return;
+    this.openInventory();
+  }
+
+  private async openInventory(): Promise<void> {
+    if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
+
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
+      padding: 24px; width: 620px; max-height: 80vh; overflow-y: auto;
+      z-index: 9000; font-family: monospace; color: #eee;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    `;
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('keyup', (e) => e.stopPropagation());
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'X';
+    closeBtn.style.cssText = `
+      position: absolute; top: 8px; right: 12px; background: none; border: none;
+      color: #888; font-size: 18px; cursor: pointer; font-family: monospace; font-weight: bold;
+    `;
+    closeBtn.onmouseenter = () => { closeBtn.style.color = '#fff'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.color = '#888'; };
+    closeBtn.onclick = () => { this.inventoryPanel?.remove(); this.inventoryPanel = null; this.inventoryPreview = null; };
+    panel.appendChild(closeBtn);
+
+    const title = document.createElement('h2');
+    title.textContent = 'INVENTORY';
+    title.style.cssText = 'margin: 0 0 16px; text-align: center; color: #ffdd44; font-size: 18px;';
+    panel.appendChild(title);
+
+    const content = document.createElement('div');
+    content.id = 'inventory-content';
+    panel.appendChild(content);
+
+    document.body.appendChild(panel);
+    this.inventoryPanel = panel;
+
+    await this.renderInventoryContent(content);
+  }
+
+  private static readonly DEV_ITEMS = [
+    { id: 'dev-1', item_type: 'head_accessory', item_id: 'wizard_hat', rarity: 'rare', equipped: false },
+    { id: 'dev-2', item_type: 'upper_body', item_id: 'worn_tshirt', rarity: 'common', equipped: false },
+    { id: 'dev-3', item_type: 'lower_body', item_id: 'blue_jeans', rarity: 'common', equipped: false },
+    { id: 'dev-4', item_type: 'feet', item_id: 'beatup_sneakers', rarity: 'common', equipped: false },
+  ];
+
+  private devEquipState = new Map<string, boolean>();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async renderInventoryContent(container: HTMLElement): Promise<void> {
+    container.innerHTML = '<div style="text-align: center; color: #555; padding: 40px 0;">Loading...</div>';
+
+    const authId = this.authState?.session?.user?.id;
+    const isDevMode = !authId;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let items: any[];
+
+    if (isDevMode) {
+      // Dev mode: use local mock items with togglable equip state
+      items = IsoScene.DEV_ITEMS.map(i => ({
+        ...i,
+        equipped: this.devEquipState.get(i.id) ?? i.equipped,
+      }));
+    } else {
+      try {
+        const resp = await fetch(`${this.apiBase()}/api/player/${authId}/inventory`);
+        if (!resp.ok) throw new Error('fetch failed');
+        items = await resp.json();
+      } catch {
+        container.innerHTML = '<div style="text-align: center; color: #666; padding: 40px 0;">Could not load inventory</div>';
+        return;
+      }
+    }
+
+    container.innerHTML = '';
+
+    // ─── Equipment Slots (top section) ────────────────────────────────
+    const equippedSection = document.createElement('div');
+    equippedSection.style.cssText = 'margin-bottom: 20px;';
+
+    const equippedHeading = document.createElement('div');
+    equippedHeading.textContent = 'EQUIPMENT';
+    equippedHeading.style.cssText = 'font-size: 12px; color: #888; margin-bottom: 8px; letter-spacing: 2px;';
+    equippedSection.appendChild(equippedHeading);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const equippedBySlot = new Map<string, any>();
+    for (const item of (items ?? [])) {
+      if (item.equipped) equippedBySlot.set(item.item_type, item);
+    }
+
+    // Character preview + slot grid
+    const equipRow = document.createElement('div');
+    equipRow.style.cssText = 'display: flex; gap: 16px; align-items: flex-start;';
+
+    const previewWrap = document.createElement('div');
+    previewWrap.style.cssText = `
+      flex-shrink: 0; width: 120px; text-align: center;
+      background: #111; border: 1px solid #333; border-radius: 6px; padding: 12px 8px;
+    `;
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = 92;
+    previewCanvas.height = 92;
+    previewCanvas.style.cssText = 'display: block; margin: 0 auto 8px; image-rendering: pixelated;';
+    // Build current loadout from items for preview
+    const currentLoadout: Record<string, string> = {};
+    for (const item of (items ?? [])) {
+      if (item.equipped) currentLoadout[item.item_type] = item.item_id;
+    }
+    this.drawCharPreview(previewCanvas, currentLoadout);
+    this.inventoryPreview = previewCanvas;
+    previewWrap.appendChild(previewCanvas);
+    equipRow.appendChild(previewWrap);
+
+    // Slot grid (4 columns)
+    const slotGrid = document.createElement('div');
+    slotGrid.style.cssText = 'display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 1;';
+
+    const slotKeys = Object.keys(IsoScene.SLOT_META);
+    for (const slotKey of slotKeys) {
+      const meta = IsoScene.SLOT_META[slotKey];
+      const equipped = equippedBySlot.get(slotKey);
+
+      const slot = document.createElement('div');
+      const borderColor = equipped ? (IsoScene.RARITY_COLORS[equipped.rarity] ?? '#555') : '#2a2a3a';
+      slot.style.cssText = `
+        background: ${equipped ? '#1e1e30' : '#131320'}; border: 2px solid ${borderColor};
+        border-radius: 6px; padding: 6px 4px; text-align: center; cursor: ${equipped ? 'pointer' : 'default'};
+        min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      `;
+
+      if (equipped) {
+        slot.innerHTML = `
+          <div style="font-size: 16px; margin-bottom: 2px;">${meta.icon}</div>
+          <div style="font-size: 10px; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;">${equipped.item_id}</div>
+          <div style="font-size: 9px; color: ${borderColor}; text-transform: capitalize;">${equipped.rarity}</div>
+        `;
+        slot.title = `${meta.label}: ${equipped.item_id} (${equipped.rarity}) - Click to unequip`;
+        slot.onmouseenter = () => { slot.style.borderColor = '#ffdd44'; };
+        slot.onmouseleave = () => { slot.style.borderColor = borderColor; };
+        slot.onclick = () => this.toggleEquipItem(equipped.id, false, container);
+      } else {
+        slot.innerHTML = `
+          <div style="font-size: 16px; opacity: 0.3; margin-bottom: 2px;">${meta.icon}</div>
+          <div style="font-size: 9px; color: #444;">${meta.label}</div>
+        `;
+        slot.title = `${meta.label}: empty`;
+      }
+
+      slotGrid.appendChild(slot);
+    }
+
+    equipRow.appendChild(slotGrid);
+    equippedSection.appendChild(equipRow);
+    container.appendChild(equippedSection);
+
+    // ─── Bag / All Items (bottom section) ─────────────────────────────
+    const bagSection = document.createElement('div');
+
+    const bagHeading = document.createElement('div');
+    bagHeading.textContent = `BAG (${items?.length ?? 0} items)`;
+    bagHeading.style.cssText = 'font-size: 12px; color: #888; margin-bottom: 8px; letter-spacing: 2px; border-top: 1px solid #333; padding-top: 12px;';
+    bagSection.appendChild(bagHeading);
+
+    if (!items || items.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'text-align: center; color: #555; padding: 30px 0;';
+      empty.innerHTML = `
+        <div style="font-size: 28px; margin-bottom: 8px;">...</div>
+        <div>No items yet</div>
+        <div style="font-size: 11px; margin-top: 6px; color: #444;">Win races and visit the store to earn items!</div>
+      `;
+      bagSection.appendChild(empty);
+    } else {
+      const bagGrid = document.createElement('div');
+      bagGrid.style.cssText = 'display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;';
+
+      for (const item of items) {
+        const card = document.createElement('div');
+        const borderColor = IsoScene.RARITY_COLORS[item.rarity] ?? '#444';
+        const isEquipped = !!item.equipped;
+        card.style.cssText = `
+          background: ${isEquipped ? '#1e1e30' : '#181828'}; border: 2px solid ${borderColor};
+          border-radius: 6px; padding: 8px 4px; text-align: center; cursor: pointer; position: relative;
+        `;
+
+        const slotMeta = IsoScene.SLOT_META[item.item_type];
+        const slotIcon = slotMeta?.icon ?? '?';
+        const slotLabel = slotMeta?.label ?? item.item_type;
+
+        card.innerHTML = `
+          <div style="width: 36px; height: 36px; background: ${borderColor}22; border-radius: 4px;
+            margin: 0 auto 4px; display: flex; align-items: center; justify-content: center;
+            font-size: 18px;">${slotIcon}</div>
+          <div style="font-size: 10px; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.item_id}</div>
+          <div style="font-size: 9px; color: ${borderColor}; text-transform: capitalize;">${item.rarity}</div>
+          <div style="font-size: 9px; color: #555; margin-top: 2px;">${slotLabel}</div>
+          ${isEquipped ? '<div style="font-size: 9px; color: #ffdd44; margin-top: 2px; font-weight: bold;">EQUIPPED</div>' : ''}
+        `;
+
+        card.title = isEquipped
+          ? `${item.item_id} (${item.rarity} ${slotLabel}) - Click to unequip`
+          : `${item.item_id} (${item.rarity} ${slotLabel}) - Click to equip`;
+
+        card.onmouseenter = () => { card.style.borderColor = '#ffdd44'; };
+        card.onmouseleave = () => { card.style.borderColor = borderColor; };
+        card.onclick = () => this.toggleEquipItem(item.id, !isEquipped, container);
+        bagGrid.appendChild(card);
+      }
+
+      bagSection.appendChild(bagGrid);
+    }
+
+    container.appendChild(bagSection);
+  }
+
+  private async toggleEquipItem(itemId: string, equip: boolean, contentContainer?: HTMLElement): Promise<void> {
+    const authId = this.authState?.session?.user?.id;
+
+    if (!authId) {
+      // Dev mode: toggle locally and apply loadout directly
+      const devItem = IsoScene.DEV_ITEMS.find(i => i.id === itemId);
+      if (devItem) {
+        // Unequip any other item in the same slot
+        for (const di of IsoScene.DEV_ITEMS) {
+          if (di.item_type === devItem.item_type) this.devEquipState.set(di.id, false);
+        }
+        this.devEquipState.set(itemId, equip);
+        // Build loadout from dev equip state and apply visually
+        const loadout: Record<string, string> = {};
+        for (const di of IsoScene.DEV_ITEMS) {
+          if (this.devEquipState.get(di.id)) loadout[di.item_type] = di.item_id;
+        }
+        const localAv = this.avatars.get(this.mySlotIndex);
+        if (localAv) this.applyLoadout(localAv, loadout, localAv.charKey);
+      }
+      if (contentContainer) await this.renderInventoryContent(contentContainer);
+      return;
+    }
+
+    try {
+      await fetch(`${this.apiBase()}/api/player/${authId}/equip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inventoryItemId: itemId, equipped: equip }),
+      });
+      // Tell server to re-fetch and broadcast our loadout to all players
+      if (this.room) this.room.send('refreshLoadout');
+      // Re-render inventory content in place
+      if (contentContainer) {
+        await this.renderInventoryContent(contentContainer);
+      }
+    } catch { /* ignore */ }
+  }
+
+  private drawCharPreview(canvas: HTMLCanvasElement, loadout?: Record<string, string>): void {
+    try {
+      const localAv = this.avatars.get(this.mySlotIndex);
+      const charKey = localAv?.charKey ?? SLOT_CHARACTERS[0].char.key;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const drawSize = 56;
+      const dx = (canvas.width - drawSize) / 2;
+      const dy = (canvas.height - drawSize) / 2;
+
+      // Draw body
+      const bodyTex = this.textures.get(`${charKey}_idle_south-east`);
+      if (!bodyTex || bodyTex.key === '__MISSING') return;
+      const bodyFrame = bodyTex.get(0);
+      if (!bodyFrame) return;
+      const bodyImg = bodyFrame.source.image as HTMLImageElement | HTMLCanvasElement;
+      ctx.drawImage(bodyImg, bodyFrame.cutX, bodyFrame.cutY, bodyFrame.cutWidth, bodyFrame.cutHeight, dx, dy, drawSize, drawSize);
+
+      // Draw equipment layers on top in layer order
+      const equip = loadout ?? localAv?.loadout ?? {};
+      for (const slot of LAYER_ORDER) {
+        if (slot === 'skin') continue;
+        const itemId = equip[slot];
+        if (!itemId) continue;
+        const eqTexKey = `equip_${itemId}_idle_south-east`;
+        let eqTex = this.textures.get(eqTexKey);
+        if (!eqTex || eqTex.key === '__MISSING') {
+          // Fallback to walk texture
+          eqTex = this.textures.get(`equip_${itemId}_south-east`);
+        }
+        if (!eqTex || eqTex.key === '__MISSING') continue;
+        const eqFrame = eqTex.get(0);
+        if (!eqFrame) continue;
+        const eqImg = eqFrame.source.image as HTMLImageElement | HTMLCanvasElement;
+        ctx.drawImage(eqImg, eqFrame.cutX, eqFrame.cutY, eqFrame.cutWidth, eqFrame.cutHeight, dx, dy, drawSize, drawSize);
+      }
+    } catch { /* texture not loaded yet */ }
+  }
+
   private addHud(): void {
     this.add
-      .text(10, 10, 'WASD · SHIFT sprint · SPACE jump · E pickup', {
+      .text(10, 10, 'WASD · SHIFT sprint · SPACE jump · E pickup · I inventory', {
         fontSize: '14px', color: '#aabbcc', backgroundColor: '#00000066', padding: { x: 8, y: 4 },
       })
       .setScrollFactor(0).setDepth(9999);
+
+    this.createInventoryButton();
 
     const { width, height } = this.scale;
 

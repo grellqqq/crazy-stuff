@@ -202,6 +202,16 @@ export class RaceRoom extends Room<RaceState> {
       this.handleRematchVote(client.sessionId);
     });
 
+    this.onMessage('refreshLoadout', (client) => {
+      const authId = this.authIds.get(client.sessionId);
+      if (!authId) return;
+      const slot = this.state.slots.findIndex(s => s.sessionId === client.sessionId);
+      if (slot < 0) return;
+      this.fetchAndBroadcastLoadout(client.sessionId, authId, slot).catch(
+        e => console.error('[RaceRoom] refreshLoadout error:', e)
+      );
+    });
+
     console.log(`[RaceRoom] created — ${this.buttons.length} buttons, ${this.pickups.length} pickups`);
   }
 
