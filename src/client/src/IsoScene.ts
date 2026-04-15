@@ -48,11 +48,14 @@ interface CharacterDef {
 }
 
 /** Direction key → PixelLab direction suffix for multi-sheet characters. */
+// West-facing directions reuse east textures with flipX=true. This keeps the body mirror
+// of east (which PixelLab generates inconsistently for west), and lets equipment overlays
+// stay perfectly aligned since they're also mirrored east.
 const PIXELLAB_DIR_MAP: Record<string, { sheetSuffix: string; flipX: boolean }> = {
   S:  { sheetSuffix: '_south',       flipX: false },
-  SA: { sheetSuffix: '_south-west',  flipX: false },
-  A:  { sheetSuffix: '_west',        flipX: false },
-  WA: { sheetSuffix: '_north-west',  flipX: false },
+  SA: { sheetSuffix: '_south-east',  flipX: true  },
+  A:  { sheetSuffix: '_east',        flipX: true  },
+  WA: { sheetSuffix: '_north-east',  flipX: true  },
   W:  { sheetSuffix: '_north',       flipX: false },
   WD: { sheetSuffix: '_north-east',  flipX: false },
   D:  { sheetSuffix: '_east',        flipX: false },
@@ -117,12 +120,20 @@ const EQUIP_FRAME_SIZES: Record<string, number> = {
 /** Available animation types per equipment item (only load what exists). */
 const EQUIP_AVAILABLE_ANIMS: Record<string, string[]> = {
   wizard_hat: ['walk', 'idle'],
+  worn_tshirt: ['walk', 'idle', 'run', 'jump'],
+  worn_tshirt_red: ['walk', 'idle', 'run', 'jump'],
+  worn_tshirt_star: ['walk', 'idle', 'run', 'jump'],
+  worn_tshirt_stripes: ['walk', 'idle', 'run', 'jump'],
+  blue_jeans: ['walk', 'idle', 'run', 'jump'],
+  beatup_sneakers: ['walk', 'idle', 'run', 'jump'],
 };
 
 /** Direction key → PixelLab suffix lookup (e.g. 'S' → 'south'). */
+// West-facing directions map to east suffixes — the avatar flips at runtime (see
+// PIXELLAB_DIR_MAP.flipX) so equipment textures must use the same east-side assets.
 const DIR_TO_SUFFIX: Record<string, string> = {
-  S: 'south', SA: 'south-west', A: 'west', WA: 'north-west',
-  W: 'north', WD: 'north-east', D: 'east', SD: 'south-east',
+  S: 'south',      SA: 'south-east', A: 'east',      WA: 'north-east',
+  W: 'north',      WD: 'north-east', D: 'east',      SD: 'south-east',
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -535,9 +546,10 @@ export class IsoScene extends Phaser.Scene {
     // Frozen/stuck flash
     const localAv = this.avatars.get(this.mySlotIndex);
     if (localAv && (localAv.frozen || localAv.stuck)) {
+      const flash = Math.floor(_time / 500) % 2 === 0;
       localAv.bodySprite.setVisible(Math.floor(_time / 500) % 2 === 0);
       localAv.bodySprite.setAlpha(1);
-      for (const [, s] of localAv.equipmentLayers) { s.setVisible(localAv.bodySprite.visible); s.setAlpha(1); }
+      for (const [, s] of localAv.equipmentLayers) { s.setVisible(flash); s.setAlpha(1); }
     } else if (localAv && localAv.immune) {
       localAv.bodySprite.setVisible(true);
       const ghostAlpha = 0.5 + Math.sin(_time / 100) * 0.2;
@@ -1092,13 +1104,13 @@ export class IsoScene extends Phaser.Scene {
       if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('usePickup');
     });
     kb.on('keydown-SPACE', () => {
-      if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('jump');
+      if (this.room && (this.currentPhase === RacePhase.Racing || this.currentPhase === RacePhase.Waiting)) this.room.send('jump');
     });
     kb.on('keydown-I', () => this.toggleInventory());
   }
 
   private sendMove(direction: string): void {
-    if (this.currentPhase !== RacePhase.Racing) return;
+    if (this.currentPhase !== RacePhase.Racing && this.currentPhase !== RacePhase.Waiting) return;
     this.playerFacing = direction;
     this.lastSendTime = Date.now();
     const sprint = this.shiftKey?.isDown ?? false;
@@ -1114,6 +1126,15 @@ export class IsoScene extends Phaser.Scene {
       const isNew = !this.avatars.has(index);
       if (isNew) {
         this.avatars.set(index, this.createAvatar(index));
+        // Dev mode: apply starter loadout for local player
+        if (!this.authState && slot.sessionId === this.mySessionId) {
+          const av = this.avatars.get(index)!;
+          const loadout: Record<string, string> = {};
+          for (const di of IsoScene.DEV_ITEMS) {
+            if (di.equipped) loadout[di.item_type] = di.item_id;
+          }
+          if (Object.keys(loadout).length > 0) this.applyLoadout(av, loadout, av.charKey);
+        }
       }
       if (slot.sessionId === this.mySessionId) this.mySlotIndex = index;
       if (slot.sessionId) this.slotBySession.set(slot.sessionId, index);
@@ -1269,10 +1290,15 @@ export class IsoScene extends Phaser.Scene {
         this.loadedEquipment.add(itemId);
         this.registerEquipmentAnims(itemId);
       }
-      // Rebuild if avatar still exists
-      if (this.avatars.has(av.slotIndex)) {
+      // Rebuild if avatar still exists — use fresh reference from map, not stale closure
+      const freshAv = this.avatars.get(av.slotIndex);
+      if (freshAv) {
         console.log(`[Equipment] rebuilding layers for slot ${av.slotIndex}`);
-        this.rebuildEquipmentLayers(av, charKey);
+        this.rebuildEquipmentLayers(freshAv, charKey);
+        // Re-render inventory preview if panel is open — textures are now ready
+        if (this.inventoryPreview && freshAv.slotIndex === this.mySlotIndex) {
+          this.drawCharPreview(this.inventoryPreview, freshAv.loadout);
+        }
       }
     });
     this.load.start();
@@ -1356,6 +1382,8 @@ export class IsoScene extends Phaser.Scene {
       equipSprite.setData('itemId', itemId);
       av.equipmentLayers.set(slot, equipSprite);
     }
+
+    // Base body stays visible — equipment overlays only cover the torso area
   }
 
   /** Position the sprite and labels at the lerped display position. */
@@ -1476,10 +1504,20 @@ export class IsoScene extends Phaser.Scene {
       }
       equipSprite.setAlpha(1);
 
-      // Switch animation when direction or anim type changes
+      // Sync equipment to body: same animation key and same frame index
       const currentEquipKey = equipSprite.anims.currentAnim?.key;
       if (currentEquipKey !== equipAnimKey) {
         equipSprite.play(equipAnimKey);
+      }
+
+      // Lock equipment frame to body frame index (prevents drift/lag)
+      if (bodyFrame && equipSprite.anims.currentAnim) {
+        const bodyIdx = bodyFrame.index;  // 1-based in Phaser
+        const equipFrames = equipSprite.anims.currentAnim.frames;
+        const clampedIdx = Math.min(bodyIdx, equipFrames.length) - 1;
+        if (clampedIdx >= 0 && equipSprite.anims.currentFrame?.index !== bodyIdx) {
+          equipSprite.anims.setCurrentFrame(equipFrames[clampedIdx]);
+        }
       }
 
       // Match body animation speed
@@ -2052,9 +2090,12 @@ export class IsoScene extends Phaser.Scene {
 
   private static readonly DEV_ITEMS = [
     { id: 'dev-1', item_type: 'head_accessory', item_id: 'wizard_hat', rarity: 'rare', equipped: false },
-    { id: 'dev-2', item_type: 'upper_body', item_id: 'worn_tshirt', rarity: 'common', equipped: false },
-    { id: 'dev-3', item_type: 'lower_body', item_id: 'blue_jeans', rarity: 'common', equipped: false },
-    { id: 'dev-4', item_type: 'feet', item_id: 'beatup_sneakers', rarity: 'common', equipped: false },
+    { id: 'dev-2', item_type: 'upper_body', item_id: 'worn_tshirt', rarity: 'common', equipped: true },
+    { id: 'dev-3', item_type: 'lower_body', item_id: 'blue_jeans', rarity: 'common', equipped: true },
+    { id: 'dev-4', item_type: 'feet', item_id: 'beatup_sneakers', rarity: 'common', equipped: true },
+    { id: 'dev-5', item_type: 'upper_body', item_id: 'worn_tshirt_red',     rarity: 'uncommon', equipped: false },
+    { id: 'dev-6', item_type: 'upper_body', item_id: 'worn_tshirt_star',    rarity: 'rare',     equipped: false },
+    { id: 'dev-7', item_type: 'upper_body', item_id: 'worn_tshirt_stripes', rarity: 'uncommon', equipped: false },
   ];
 
   private devEquipState = new Map<string, boolean>();
@@ -2240,10 +2281,12 @@ export class IsoScene extends Phaser.Scene {
           if (di.item_type === devItem.item_type) this.devEquipState.set(di.id, false);
         }
         this.devEquipState.set(itemId, equip);
-        // Build loadout from dev equip state and apply visually
+        // Build loadout from dev equip state, falling back to DEV_ITEMS default so initial
+        // starter items (tshirt) stay equipped until the user explicitly toggles them off.
         const loadout: Record<string, string> = {};
         for (const di of IsoScene.DEV_ITEMS) {
-          if (this.devEquipState.get(di.id)) loadout[di.item_type] = di.item_id;
+          const isOn = this.devEquipState.get(di.id) ?? di.equipped;
+          if (isOn) loadout[di.item_type] = di.item_id;
         }
         const localAv = this.avatars.get(this.mySlotIndex);
         if (localAv) this.applyLoadout(localAv, loadout, localAv.charKey);

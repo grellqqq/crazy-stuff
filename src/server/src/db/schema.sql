@@ -1,7 +1,10 @@
 -- Players table — stores account data, XP, coins
 CREATE TABLE IF NOT EXISTS players (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  auth_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  auth_id UUID UNIQUE,                              -- legacy Supabase auth ID (kept for migration)
+  email TEXT UNIQUE,                                 -- email/password login
+  password_hash TEXT,                                -- bcrypt hash (null for Google-only accounts)
+  google_sub TEXT UNIQUE,                            -- Google OAuth subject ID
   username TEXT UNIQUE NOT NULL,
   xp INTEGER NOT NULL DEFAULT 0,
   level INTEGER NOT NULL DEFAULT 1,
@@ -27,20 +30,6 @@ CREATE TABLE IF NOT EXISTS inventory (
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_inventory_player ON inventory(player_id);
 CREATE INDEX IF NOT EXISTS idx_players_auth ON players(auth_id);
+CREATE INDEX IF NOT EXISTS idx_players_email ON players(email);
+CREATE INDEX IF NOT EXISTS idx_players_google_sub ON players(google_sub);
 CREATE INDEX IF NOT EXISTS idx_players_username ON players(username);
-
--- Enable Row Level Security
-ALTER TABLE players ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inventory ENABLE ROW LEVEL SECURITY;
-
--- Policies: users can read/update their own data
-CREATE POLICY "Users can read own player" ON players
-  FOR SELECT USING (auth.uid() = auth_id);
-
-CREATE POLICY "Users can update own player" ON players
-  FOR UPDATE USING (auth.uid() = auth_id);
-
-CREATE POLICY "Users can read own inventory" ON inventory
-  FOR SELECT USING (player_id IN (SELECT id FROM players WHERE auth_id = auth.uid()));
-
--- Service role bypasses RLS for server-side operations

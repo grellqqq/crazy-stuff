@@ -19,4 +19,6 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: isDevMode ? [IsoScene] : [TitleScene, LobbyScene, IsoScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+// Expose for debugging / automated tests
+(window as unknown as { __game: Phaser.Game }).__game = game;

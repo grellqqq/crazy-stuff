@@ -50,6 +50,10 @@
 
 <div class="toolbar">
   <div>
+    <label>Base character folder:</label><br>
+    <input type="file" id="baseInput" webkitdirectory multiple>
+  </div>
+  <div>
     <label>Equipped spritesheet folder:</label><br>
     <input type="file" id="fileInput" webkitdirectory multiple>
   </div>
@@ -67,6 +71,12 @@
     <button class="btn-secondary" onclick="setZoom(zoom-1)">-</button>
     <span id="zoomLabel" class="zoom-info">4x</span>
     <button class="btn-secondary" onclick="setZoom(zoom+1)">+</button>
+  </div>
+  <div>
+    <label>Offset X: <span id="offXLabel">0</span></label>
+    <input type="range" id="offX" min="-20" max="20" value="0" oninput="updateOffset()"><br>
+    <label>Offset Y: <span id="offYLabel">0</span></label>
+    <input type="range" id="offY" min="-20" max="20" value="0" oninput="updateOffset()">
   </div>
   <div>
     <button class="btn-danger" onclick="clearMask()">Clear This Dir</button>
@@ -97,13 +107,14 @@
     <div id="previewArea" class="preview-grid"></div>
     <div class="instructions" style="margin-top: 12px;">
       <strong>Steps:</strong><br>
-      1. Click <strong>"Choose Files"</strong> and select the equipped character sheets folder<br>
-      2. <kbd>Left-click drag</kbd> to paint equipment area (green = keep)<br>
-      3. <kbd>Right-click drag</kbd> to erase mistakes<br>
-      4. Use <strong>"Copy Mask -> All Dirs"</strong> then fine-tune each direction<br>
-      5. Green dot on direction tabs = has mask data<br>
-      6. Click <strong>"Export All"</strong> to download overlay PNGs<br>
-      7. Move PNGs to <code>sprites/equipment/{slot}/{itemId}/male/</code>
+      1. Load the <strong>base character</strong> folder first (e.g. <code>sheets/base-male/</code>)<br>
+      2. Load the <strong>equipped character</strong> folder (e.g. <code>sheets/worn_tshirt/</code>)<br>
+      3. <kbd>Left-click drag</kbd> to paint equipment area (green = keep)<br>
+      4. <kbd>Right-click drag</kbd> to erase mistakes<br>
+      5. Preview shows overlay <strong>on the base character</strong> — paint generously to cover all clothing edges!<br>
+      6. Use <strong>"Copy Mask -> All Dirs"</strong> then fine-tune each direction<br>
+      7. Click <strong>"Export All"</strong> to download overlay PNGs<br>
+      8. Move PNGs to <code>sprites/equipment/{slot}/{itemId}/male/</code>
     </div>
   </div>
 </div>
@@ -114,8 +125,11 @@ const DIR_SHORT = ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW'];
 
 // Core state
 let sheets = {};        // { direction: { walk: {canvas, imageData, width, height, frames}, idle: ... } }
+let baseSheets = {};    // { direction: { walk: {...}, idle: {...} } } — base character for preview
 let masks = {};          // { direction: Uint8Array } — persistent per-direction masks
 let frameW = 0, frameH = 0;
+let baseFrameW = 0, baseFrameH = 0;
+let previewOffX = 0, previewOffY = 0;
 let currentDir = 'south';
 let currentFrame = 0;
 let tool = 'brush';
@@ -159,8 +173,55 @@ function updateDirIndicators() {
   });
 }
 
-// File input
+// File inputs
+document.getElementById('baseInput').addEventListener('change', handleBaseFiles);
 document.getElementById('fileInput').addEventListener('change', handleFiles);
+
+function handleBaseFiles(e) {
+  const files = Array.from(e.target.files);
+  baseSheets = {};
+  baseFrameW = 0;
+  baseFrameH = 0;
+
+  const pngFiles = files.filter(f => f.name.endsWith('.png'));
+  const validFiles = pngFiles.filter(f => {
+    const match = f.name.match(/^(walk|run|jump|idle)_(.+)\.png$/);
+    return match && DIRECTIONS.includes(match[2]);
+  });
+
+  if (validFiles.length === 0) {
+    setStatus('No valid base sheets found.');
+    return;
+  }
+
+  let loaded = 0;
+  validFiles.forEach(file => {
+    const match = file.name.match(/^(walk|run|jump|idle)_(.+)\.png$/);
+    const [, anim, dir] = match;
+
+    const img = new Image();
+    img.onload = () => {
+      if (!baseSheets[dir]) baseSheets[dir] = {};
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const cx = c.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      const fh = img.height, fw = fh;
+      baseSheets[dir][anim] = {
+        canvas: c, imageData: cx.getImageData(0, 0, img.width, img.height),
+        width: img.width, height: img.height, frameW: fw, frameH: fh,
+        frames: Math.round(img.width / fw),
+      };
+      if (baseFrameW === 0) { baseFrameW = fw; baseFrameH = fh; }
+      loaded++;
+      if (loaded === validFiles.length) {
+        setStatus(`Base loaded (${validFiles.length} sheets, ${baseFrameW}x${baseFrameH}px). Now load the equipped folder.`);
+        render();
+      }
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 function handleFiles(e) {
   const files = Array.from(e.target.files);
@@ -357,15 +418,34 @@ function updatePreview() {
   const mask = masks[currentDir];
   if (!mask) return;
 
+  const baseDirSheets = baseSheets[currentDir];
+  // Use base frame size for the composite canvas (or equipment frame size if no base)
+  const previewW = baseFrameW || frameW;
+  const previewH = baseFrameH || frameH;
+
   for (const [anim, sheet] of Object.entries(dirSheets)) {
     const frameIdx = Math.min(currentFrame, sheet.frames - 1);
 
-    // Overlay preview
     const c = document.createElement('canvas');
-    c.width = frameW;
-    c.height = frameH;
+    c.width = previewW;
+    c.height = previewH;
     const cx = c.getContext('2d');
-    const outData = cx.createImageData(frameW, frameH);
+
+    // Step 1: Draw base character frame (if loaded)
+    const baseSheet = baseDirSheets && baseDirSheets[anim];
+    if (baseSheet) {
+      const baseFrameIdx = Math.min(frameIdx, baseSheet.frames - 1);
+      cx.drawImage(baseSheet.canvas,
+        baseFrameIdx * baseSheet.frameW, 0, baseSheet.frameW, baseSheet.frameH,
+        0, 0, previewW, previewH);
+    }
+
+    // Step 2: Build the masked equipment overlay
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = frameW;
+    overlayCanvas.height = frameH;
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const outData = overlayCtx.createImageData(frameW, frameH);
     const srcData = sheet.imageData;
 
     for (let y = 0; y < frameH; y++) {
@@ -386,13 +466,32 @@ function updatePreview() {
         }
       }
     }
+    overlayCtx.putImageData(outData, 0, 0);
 
-    cx.putImageData(outData, 0, 0);
+    // Step 3: Composite overlay onto base
+    // In-game, both sprites share origin (0.5, 0.85) and are scaled so their
+    // frame heights map to the same screen height. Replicate that here:
+    // both canvases align at (center-x, 85%-y).
+    if (baseSheet && frameW !== previewW) {
+      const scale = previewH / frameH;  // e.g. 92/80 = 1.15
+      const scaledW = frameW * scale;
+      const scaledH = frameH * scale;
+      // Align at origin (0.5, 0.85): the point at (50%, 85%) of each frame should match
+      const baseAnchorX = previewW * 0.5;
+      const baseAnchorY = previewH * 0.85;
+      const overlayAnchorX = scaledW * 0.5;
+      const overlayAnchorY = scaledH * 0.85;
+      const offsetX = baseAnchorX - overlayAnchorX + previewOffX;
+      const offsetY = baseAnchorY - overlayAnchorY + previewOffY;
+      cx.drawImage(overlayCanvas, offsetX, offsetY, scaledW, scaledH);
+    } else {
+      cx.drawImage(overlayCanvas, 0, 0);
+    }
 
     const wrapper = document.createElement('div');
     const label = document.createElement('div');
     label.className = 'preview-label';
-    label.textContent = `${anim} f${frameIdx + 1}`;
+    label.textContent = `${anim} f${frameIdx + 1}` + (baseSheet ? ' (on base)' : ' (overlay only)');
     wrapper.appendChild(c);
     wrapper.appendChild(label);
     area.appendChild(wrapper);
@@ -496,6 +595,14 @@ function setTool(t) {
 function updateBrushSize() {
   brushSize = parseInt(document.getElementById('brushSize').value);
   document.getElementById('brushSizeLabel').textContent = brushSize;
+}
+
+function updateOffset() {
+  previewOffX = parseInt(document.getElementById('offX').value);
+  previewOffY = parseInt(document.getElementById('offY').value);
+  document.getElementById('offXLabel').textContent = previewOffX;
+  document.getElementById('offYLabel').textContent = previewOffY;
+  updatePreview();
 }
 
 function setZoom(z) {

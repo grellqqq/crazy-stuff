@@ -539,7 +539,7 @@ export class RaceRoom extends Room<RaceState> {
   // ─── Movement ──────────────────────────────────────────────────────────
 
   private handleMove(sessionId: string, direction: string, sprint = false): void {
-    if (this.phase !== RacePhase.Racing) return;
+    if (this.phase !== RacePhase.Racing && this.phase !== RacePhase.Waiting) return;
 
     const slot = this.state.slots.find(s => s.sessionId === sessionId);
     const ps = this.players.get(sessionId);
@@ -622,7 +622,7 @@ export class RaceRoom extends Room<RaceState> {
   // ─── Jump ──────────────────────────────────────────────────────────────
 
   private handleJump(sessionId: string): void {
-    if (this.phase !== RacePhase.Racing) return;
+    if (this.phase !== RacePhase.Racing && this.phase !== RacePhase.Waiting) return;
 
     const slot = this.state.slots.find(s => s.sessionId === sessionId);
     const ps = this.players.get(sessionId);
