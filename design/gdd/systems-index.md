@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Created:** 2026-03-22
 **Total Systems:** 34
-**Designed:** 0 / 34
+**Designed:** 3 / 34
 
 > This index is the authoritative decomposition of the game into individual systems.
 > Each system should have its own GDD at `design/gdd/[system-slug].md`.
@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | 01 | Isometric Tile Renderer | 0 | Not Started | — |
 | 02 | Input System | 0 | Not Started | — |
-| 03 | Authentication / Account | 0 | Not Started | — |
+| 03 | Authentication / Account | 0 | Complete (reverse-doc) | [03-authentication.md](03-authentication.md) |
 | 04 | Database Persistence Layer | 0 | Not Started | — |
 | 05 | Redis Cache Layer | 4 | Not Started | — |
 | 06 | Asset Pipeline | 0 | Not Started | — |
@@ -30,9 +30,9 @@
 | # | System | Phase | Status | GDD |
 |---|---|---|---|---|
 | 07 | Player Movement | 0 | Not Started | — |
-| 08 | Item / Inventory | 2 | Not Started | — |
+| 08 | Item / Inventory | 2 | Complete (reverse-doc) | [08-item-inventory.md](08-item-inventory.md) |
 | 09 | Currency | 2 | Not Started | — |
-| 10 | Race Room (Colyseus) | 1 | Not Started | — |
+| 10 | Race Room (Colyseus) | 1 | Complete (reverse-doc) | [10-race-room.md](10-race-room.md) |
 
 ### Gameplay — Lobby (Layer 2–3)
 
@@ -206,13 +206,13 @@ add formulas, edge cases, and acceptance criteria needed before implementation.
 
 ## Progress Tracker
 
-**Phase 0:** 0/6 systems designed
-**Phase 1:** 0/7 systems designed
-**Phase 2:** 0/7 systems designed
+**Phase 0:** 1/6 systems designed
+**Phase 1:** 1/7 systems designed
+**Phase 2:** 1/7 systems designed
 **Phase 3:** 0/6 systems designed
 **Phase 4:** 0/8 systems designed
 
-**Overall:** 0/34 systems designed
+**Overall:** 3/34 systems designed
 
 *Update this tracker as system GDDs are completed. Mark Status as "In Progress",
 "Complete", or "Deferred" and add the GDD path.*
