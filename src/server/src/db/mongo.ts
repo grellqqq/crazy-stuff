@@ -80,13 +80,6 @@ export async function createUser(email: string, passwordHash: string, username: 
 }
 
 export async function createGoogleUser(email: string, googleSub: string, username: string) {
-  // Try to find existing user by email (might have registered with password first)
-  const existing = await findUserByEmail(email);
-  if (existing) {
-    // Link Google account
-    await db.collection('users').updateOne({ _id: existing._id }, { $set: { googleSub } });
-    return existing;
-  }
   const result = await db.collection('users').insertOne({
     email: email.toLowerCase(),
     passwordHash: null,
@@ -95,6 +88,10 @@ export async function createGoogleUser(email: string, googleSub: string, usernam
     createdAt: new Date(),
   });
   return { _id: result.insertedId, email, username };
+}
+
+export async function linkGoogleToUser(userId: ObjectId, googleSub: string) {
+  await db.collection('users').updateOne({ _id: userId }, { $set: { googleSub } });
 }
 
 export async function getUserById(userId: string) {

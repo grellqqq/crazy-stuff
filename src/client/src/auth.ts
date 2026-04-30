@@ -29,7 +29,7 @@ function apiBase(): string {
   return `${loc.protocol}//${loc.host}`;
 }
 
-async function apiPost(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; data?: any; error?: string }> {
+async function apiPost(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; status?: number; data?: any; error?: string }> {
   try {
     const resp = await fetch(`${apiBase()}${path}`, {
       method: 'POST',
@@ -37,8 +37,8 @@ async function apiPost(path: string, body: Record<string, unknown>): Promise<{ o
       body: JSON.stringify(body),
     });
     const data = await resp.json();
-    if (!resp.ok) return { ok: false, error: data.error ?? 'Request failed' };
-    return { ok: true, data };
+    if (!resp.ok) return { ok: false, status: resp.status, data, error: data.error ?? 'Request failed' };
+    return { ok: true, status: resp.status, data };
   } catch {
     return { ok: false, error: 'Network error' };
   }
@@ -255,6 +255,15 @@ export async function authenticate(): Promise<AuthState> {
         }
 
         const result = await apiPost('/auth/google', { idToken, username });
+
+        // Existing password account on this email — require password proof to link.
+        if (!result.ok && result.status === 409 && result.data?.requiresPasswordLink) {
+          const linked = await promptLinkGoogle(overlay, idToken, result.data.email);
+          if (!linked) { showError('Link cancelled'); return; }
+          finish(linked.token, linked.user);
+          return;
+        }
+
         if (!result.ok) { showError(result.error!); return; }
         finish(result.data.token, result.data.user);
       } catch (e: unknown) {
@@ -262,6 +271,76 @@ export async function authenticate(): Promise<AuthState> {
       }
     };
   });
+}
+
+/**
+ * Render the "link Google to existing password account" prompt over the auth modal.
+ * Resolves with the login result on success, or null if the user cancels.
+ */
+function promptLinkGoogle(
+  parent: HTMLElement,
+  idToken: string,
+  email: string,
+): Promise<{ token: string; user: { id: string; username: string; email?: string } } | null> {
+  return new Promise((resolve) => {
+    const linkOverlay = document.createElement('div');
+    linkOverlay.style.cssText = `
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); display: flex; align-items: center;
+      justify-content: center; font-family: monospace;
+    `;
+
+    linkOverlay.innerHTML = `
+      <div style="background: #1a1a2e; border: 2px solid #4488ff; border-radius: 8px; padding: 24px; width: 320px; color: #eee;">
+        <h3 style="margin: 0 0 12px; color: #fff; font-size: 16px;">Link Google account</h3>
+        <p style="margin: 0 0 16px; font-size: 12px; color: #ccc; line-height: 1.4;">
+          An account already exists for <strong style="color: #fff;">${escapeHtml(email)}</strong>.<br>
+          Enter your password to link Google sign-in to it.
+        </p>
+        <div id="link-error" style="color: #ff4444; font-size: 12px; margin-bottom: 8px; display: none;"></div>
+        <input id="link-password" type="password" placeholder="Password"
+          style="width: 100%; padding: 10px; margin-bottom: 12px; background: #222; border: 1px solid #555; color: #fff; border-radius: 4px; box-sizing: border-box; font-family: monospace;" />
+        <button id="link-submit" style="width: 100%; padding: 10px; background: #4488ff; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold;">LINK & SIGN IN</button>
+        <button id="link-cancel" style="width: 100%; padding: 8px; background: transparent; border: 1px solid #555; color: #aaa; border-radius: 4px; cursor: pointer; font-family: monospace; margin-top: 8px;">Cancel</button>
+      </div>
+    `;
+
+    parent.appendChild(linkOverlay);
+    linkOverlay.addEventListener('keydown', (e) => e.stopPropagation());
+    linkOverlay.addEventListener('keyup', (e) => e.stopPropagation());
+    linkOverlay.addEventListener('keypress', (e) => e.stopPropagation());
+
+    const passInput = linkOverlay.querySelector('#link-password') as HTMLInputElement;
+    const errorDiv = linkOverlay.querySelector('#link-error') as HTMLDivElement;
+    passInput.focus();
+
+    const showLinkError = (msg: string) => {
+      errorDiv.textContent = msg;
+      errorDiv.style.display = 'block';
+    };
+
+    const submit = async () => {
+      const password = passInput.value;
+      if (!password) { showLinkError('Password required'); return; }
+
+      const result = await apiPost('/auth/google/link', { idToken, password });
+      if (!result.ok) { showLinkError(result.error!); return; }
+
+      linkOverlay.remove();
+      resolve({ token: result.data.token, user: result.data.user });
+    };
+
+    (linkOverlay.querySelector('#link-submit') as HTMLButtonElement).onclick = submit;
+    passInput.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+    (linkOverlay.querySelector('#link-cancel') as HTMLButtonElement).onclick = () => {
+      linkOverlay.remove();
+      resolve(null);
+    };
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
 /** Sign out — clear local tokens. */

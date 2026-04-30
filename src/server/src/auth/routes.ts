@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import {
   findUserByEmail, findUserByUsername, findUserByGoogleSub, createUser, createGoogleUser,
-  getUserById, getOrCreatePlayer,
+  linkGoogleToUser, getUserById, getOrCreatePlayer,
 } from '../db/mongo';
 import { JWT_SECRET, signToken, type JwtPayload } from './jwt';
 
@@ -115,21 +115,33 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ error: 'Invalid Google token' });
     }
 
-    const username = cleanUsername(rawUsername ?? googleUser.name ?? googleUser.email.split('@')[0]);
-
-    // Find by Google sub or create
+    // 1. If a user with this Google sub already exists, log them in.
     let user = await findUserByGoogleSub(googleUser.sub);
+
     if (!user) {
+      // 2. Check for an existing password account on the same email.
+      //    Auto-linking would be an account-takeover vector — require password proof instead.
+      const emailMatch = await findUserByEmail(googleUser.email);
+      if (emailMatch && !emailMatch.googleSub && emailMatch.passwordHash) {
+        return res.status(409).json({
+          error: 'account_exists',
+          requiresPasswordLink: true,
+          email: googleUser.email,
+        });
+      }
+
+      // 3. No existing account — create a fresh Google-only user.
+      const username = cleanUsername(rawUsername ?? googleUser.name ?? googleUser.email.split('@')[0]);
       user = await createGoogleUser(googleUser.email, googleUser.sub, username);
     }
 
     // Ensure player record exists
-    await getOrCreatePlayer(user!._id.toString(), user!.username ?? username);
+    await getOrCreatePlayer(user!._id.toString(), user!.username);
 
     const token = signToken(user as any);
     res.json({
       token,
-      user: { id: user!._id.toString(), username: user!.username ?? username, email: user!.email },
+      user: { id: user!._id.toString(), username: user!.username, email: user!.email },
     });
   } catch (e: unknown) {
     console.error('[Auth] google error:', e);
@@ -137,6 +149,54 @@ router.post('/google', async (req, res) => {
       ? 'Username already taken'
       : 'Google login failed';
     res.status(500).json({ error: msg });
+  }
+});
+
+// ─── POST /auth/google/link ─────────────────────────────────────────────────
+// Verify the user's password, then attach the Google sub to their account.
+// Used after /auth/google returns 409 account_exists.
+
+router.post('/google/link', async (req, res) => {
+  try {
+    const { idToken, password } = req.body;
+    if (!idToken || !password) {
+      return res.status(400).json({ error: 'idToken and password are required' });
+    }
+
+    const googleUser = await verifyGoogleToken(idToken);
+    if (!googleUser) {
+      return res.status(401).json({ error: 'Invalid Google token' });
+    }
+
+    const user = await findUserByEmail(googleUser.email);
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Refuse if a different Google sub is already linked.
+    if (user.googleSub && user.googleSub !== googleUser.sub) {
+      return res.status(409).json({ error: 'A different Google account is already linked to this user' });
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (!user.googleSub) {
+      await linkGoogleToUser(user._id, googleUser.sub);
+    }
+
+    await getOrCreatePlayer(user._id.toString(), user.username);
+
+    const token = signToken(user as any);
+    res.json({
+      token,
+      user: { id: user._id.toString(), username: user.username, email: user.email },
+    });
+  } catch (e) {
+    console.error('[Auth] google/link error:', e);
+    res.status(500).json({ error: 'Failed to link Google account' });
   }
 });
 
