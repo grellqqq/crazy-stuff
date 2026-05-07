@@ -8,7 +8,7 @@
 - **Client Renderer**: Phaser 3 (browser-based, canvas/WebGL)
 - **Multiplayer**: Colyseus (authoritative game rooms, WebSocket)
 - **Backend API**: Node.js + Express (REST API)
-- **Database**: PostgreSQL
+- **Database**: MongoDB
 - **Language**: TypeScript (client + server)
 - **Platform**: Browser (no native app)
 
@@ -45,7 +45,7 @@
 - **colyseus** — multiplayer room server
 - **colyseus.js** — Colyseus client SDK
 - **express** — HTTP API server
-- **pg** / **postgres** — PostgreSQL client
+- **mongodb** — MongoDB official Node.js driver
 - **redis** / **ioredis** — Redis cache (leaderboard, session state, rate limiting)
 - **stripe** — payment processing (gacha pulls, seasonal store)
 
@@ -53,4 +53,5 @@
 
 - [ADR-001](../../docs/architecture/adr-001-phaser3-renderer.md) — Phaser 3 as client renderer
 - [ADR-002](../../docs/architecture/adr-002-colyseus-multiplayer.md) — Colyseus for multiplayer rooms
-- [ADR-003](../../docs/architecture/adr-003-postgresql-database.md) — PostgreSQL as primary database
+- [ADR-003](../../docs/architecture/adr-003-postgresql-database.md) — PostgreSQL as primary database (**superseded by ADR-004**)
+- [ADR-004](../../docs/architecture/adr-004-mongodb-database.md) — MongoDB as primary database

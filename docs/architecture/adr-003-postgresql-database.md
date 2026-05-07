@@ -1,7 +1,7 @@
 # ADR-003: PostgreSQL as Primary Database
 
 **Date:** 2026-03-22
-**Status:** Accepted
+**Status:** Superseded by [ADR-004](adr-004-mongodb-database.md) (2026-04-07)
 **Deciders:** Gabriel
 
 ---
