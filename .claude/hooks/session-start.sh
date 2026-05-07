@@ -44,10 +44,14 @@ if [ "$BUG_COUNT" -gt 0 ]; then
     echo "Open bugs: $BUG_COUNT"
 fi
 
-# Code health quick check
+# Code health quick check (exclude node_modules, dist, build)
 if [ -d "src" ]; then
-    TODO_COUNT=$(grep -r "TODO" src/ 2>/dev/null | wc -l)
-    FIXME_COUNT=$(grep -r "FIXME" src/ 2>/dev/null | wc -l)
+    TODO_COUNT=$(grep -r "TODO" src/ \
+        --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
+        2>/dev/null | wc -l)
+    FIXME_COUNT=$(grep -r "FIXME" src/ \
+        --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
+        2>/dev/null | wc -l)
     if [ "$TODO_COUNT" -gt 0 ] || [ "$FIXME_COUNT" -gt 0 ]; then
         echo ""
         echo "Code health: ${TODO_COUNT} TODOs, ${FIXME_COUNT} FIXMEs in src/"
