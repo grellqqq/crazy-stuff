@@ -6,6 +6,7 @@ import {
   ButtonType, PICKUP_NAMES, SLIME_SIZE, STAMINA_MAX,
   type ButtonDef, type PickupDef, type RaceResult,
 } from '../../shared/terrain';
+import { ITEMS, equipmentBodyKey } from '../../shared/items';
 
 // ─── Tile constants (4x scale from the small grid) ──────────────────────────
 
@@ -111,22 +112,6 @@ const LAYER_ORDER = [
 
 /** PixelLab direction suffixes (reused for equipment texture keys). */
 const PL_DIRS_LIST = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
-
-/** Equipment frame sizes — items generated at different canvas sizes than base characters. */
-const EQUIP_FRAME_SIZES: Record<string, number> = {
-  wizard_hat: 132,
-};
-
-/** Available animation types per equipment item (only load what exists). */
-const EQUIP_AVAILABLE_ANIMS: Record<string, string[]> = {
-  wizard_hat: ['walk', 'idle'],
-  worn_tshirt: ['walk', 'idle', 'run', 'jump'],
-  worn_tshirt_red: ['walk', 'idle', 'run', 'jump'],
-  worn_tshirt_star: ['walk', 'idle', 'run', 'jump'],
-  worn_tshirt_stripes: ['walk', 'idle', 'run', 'jump'],
-  blue_jeans: ['walk', 'idle', 'run', 'jump'],
-  beatup_sneakers: ['walk', 'idle', 'run', 'jump'],
-};
 
 /** Direction key → PixelLab suffix lookup (e.g. 'S' → 'south'). */
 // West-facing directions map to east suffixes — the avatar flips at runtime (see
@@ -1263,11 +1248,11 @@ export class IsoScene extends Phaser.Scene {
       this.loadingEquipment.add(itemId);
       const slot = Object.entries(loadout).find(([, id]) => id === itemId)?.[0];
       if (!slot) continue;
-      // Equipment frame size — may differ from base character (e.g. 132 for PixelLab-generated overlays)
-      const eqFrameSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
-      const availableAnims = EQUIP_AVAILABLE_ANIMS[itemId] ?? ['walk', 'idle'];
-      // Fall back to 'male' sprites — character-specific equipment not yet available
-      const equipCharKey = 'male';
+      // Look up item metadata (frame size, available anims, body-shape variant).
+      const item = ITEMS[itemId];
+      const eqFrameSize = item?.frameSize ?? 92;
+      const availableAnims = item?.availableAnims ?? ['walk', 'idle'];
+      const equipCharKey = equipmentBodyKey(itemId, charKey);
       for (const dir of PL_DIRS_LIST) {
         const basePath = `/sprites/equipment/${slot}/${itemId}/${equipCharKey}`;
         if (availableAnims.includes('walk'))
@@ -1377,7 +1362,7 @@ export class IsoScene extends Phaser.Scene {
 
       const equipSprite = this.add.sprite(0, 0, testTexture, 0);
       // Scale equipment to match base character on screen
-      const eqSize = EQUIP_FRAME_SIZES[itemId] ?? 92;
+      const eqSize = ITEMS[itemId]?.frameSize ?? 92;
       const equipScale = 0.75 * (92 / eqSize);
       equipSprite.setScale(equipScale);
       equipSprite.setOrigin(0.5, 0.85);
