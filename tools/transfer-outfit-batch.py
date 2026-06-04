@@ -169,6 +169,18 @@ SLOT_Y_RANGES = {
     "feet": (70, 92),         # shoes + lower shin
     "head_accessory": (0, 30),
 }
+
+# Per-(slot, anim) Y-range overrides. Jump translates the whole body vertically
+# within the 92px frame (crouch down, then extend up), so on some frames the
+# torso/legs leave the standing band entirely — the clothing gets clipped to
+# nothing and the overlay frame comes out empty, which reads in-game as the
+# avatar "flashing" back to bare body mid-jump. Jump therefore uses a much wider
+# band; the diff-threshold + cluster filter still reject body/skin noise.
+SLOT_ANIM_Y_RANGES = {
+    ("upper_body", "jump"): (20, 84),
+    ("lower_body", "jump"): (40, 92),
+    ("feet", "jump"): (45, 92),   # feet tuck up off the ground mid-jump
+}
 DIFF_THRESHOLD = 60    # stricter color-change requirement (was 45) — kills faint body-drift pixels
 MIN_CLUSTER_SIZE = 25  # larger clusters only (was 10) — kills ghost limbs and stray white pixels
 PALETTE_REJECT_DIST = 18  # unused after palette-reject was reverted
@@ -221,7 +233,7 @@ def diff_and_export(item_id, item_cfg, base_palette=None):
         base_palette = build_base_palette()
         print(f"  Base palette has {len(base_palette)} unique colors")
 
-    y_min, y_max = SLOT_Y_RANGES.get(slot, (0, 92))
+    default_y_range = SLOT_Y_RANGES.get(slot, (0, 92))
     overrides = SLOT_THRESHOLDS.get(slot, {})
     diff_thresh = overrides.get("diff", DIFF_THRESHOLD)
     min_cluster = overrides.get("min_cluster", MIN_CLUSTER_SIZE)
@@ -230,6 +242,10 @@ def diff_and_export(item_id, item_cfg, base_palette=None):
         for anim in ANIMS:
             n_frames = FRAME_COUNTS[anim]
             overlay_frames = []
+
+            # Resolve the Y-band per anim — jump needs a wider band (see
+            # SLOT_ANIM_Y_RANGES) because the body translates vertically.
+            y_min, y_max = SLOT_ANIM_Y_RANGES.get((slot, anim), default_y_range)
 
             for fi in range(1, n_frames + 1):
                 result_path = result_dir / f"{anim}_{direction}_f{fi}.png"
@@ -322,6 +338,24 @@ def diff_and_export(item_id, item_cfg, base_palette=None):
 
             if not overlay_frames:
                 continue
+
+            # Frame-fill safety net: any frame that came out (near-)empty borrows
+            # its nearest non-empty neighbour. Without this the overlay vanishes on
+            # that frame and the avatar appears to "flash" back to bare body. This
+            # catches the residual feet cases — the base char already wears shoes,
+            # so on some idle/run frames the base-vs-sneaker diff is genuinely ~0 —
+            # plus any pose that still escapes the per-anim Y-band.
+            def _opaque(img):
+                p = img.load()
+                return sum(1 for yy in range(img.height) for xx in range(img.width) if p[xx, yy][3] > 0)
+            opaques = [_opaque(f) for f in overlay_frames]
+            nonempty = [i for i, o in enumerate(opaques) if o >= 20]
+            if nonempty and len(nonempty) < len(overlay_frames):
+                for i, o in enumerate(opaques):
+                    if o < 20:
+                        j = min(nonempty, key=lambda k: abs(k - i))
+                        overlay_frames[i] = overlay_frames[j].copy()
+                        print(f"  Frame-fill: {anim}_{direction} frame {i} <- frame {j}")
 
             fw = overlay_frames[0].width
             fh = overlay_frames[0].height
