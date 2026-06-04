@@ -18,15 +18,16 @@ Covers: t-shirts, jeans (pants), sneakers.
 import colorsys
 import math
 import random
+import sys
 from pathlib import Path
 from PIL import Image, ImageDraw
 
 EQUIP_ROOT = Path("src/client/public/sprites/equipment")
 
-# Source overlays — the base variants we recolor from
-TSHIRT_SRC   = EQUIP_ROOT / "upper_body"  / "worn_tshirt"     / "male"
-JEANS_SRC    = EQUIP_ROOT / "lower_body"  / "blue_jeans"      / "male"
-SNEAKERS_SRC = EQUIP_ROOT / "feet"        / "beatup_sneakers" / "male"
+# Body shape: selects which base overlay folder to recolor from and write into.
+# Overridden by --body in main(). T-shirts and jeans are gendered (need both
+# bodies); sneakers are shared (male-only — skipped when BODY != "male").
+BODY = "male"
 
 FRAME_SIZE = 92
 
@@ -214,7 +215,7 @@ def process_sheet(src_path: Path, transform_frame) -> Image.Image:
 
 
 def generate_variant(source_dir: Path, variant_id: str, slot: str, transform_frame):
-    out_dir = EQUIP_ROOT / slot / variant_id / "male"
+    out_dir = EQUIP_ROOT / slot / variant_id / BODY
     out_dir.mkdir(parents=True, exist_ok=True)
     for src in source_dir.glob("*.png"):
         process_sheet(src, transform_frame).save(out_dir / src.name)
@@ -236,6 +237,31 @@ COLORS = {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
+    global BODY
+    # Parse --body <male|female> (default male).
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--body":
+            BODY = args[i + 1]; i += 2
+        elif a.startswith("--body="):
+            BODY = a.split("=", 1)[1]; i += 1
+        else:
+            i += 1
+
+    # Source overlays for this body — the base variants we recolor from.
+    TSHIRT_SRC   = EQUIP_ROOT / "upper_body" / "worn_tshirt"     / BODY
+    JEANS_SRC    = EQUIP_ROOT / "lower_body" / "blue_jeans"      / BODY
+    SNEAKERS_SRC = EQUIP_ROOT / "feet"       / "beatup_sneakers" / BODY
+
+    for label, src in (("worn_tshirt", TSHIRT_SRC), ("blue_jeans", JEANS_SRC)):
+        if not src.is_dir() or not any(src.glob("*.png")):
+            print(f"ERROR: missing {BODY} source overlays: {src}")
+            print(f"  (generate them first: python tools/transfer-outfit-batch.py {label} --body {BODY})")
+            sys.exit(1)
+    print(f"Body: {BODY}")
+
     # T-SHIRTS (worn_tshirt is the starter; variants are just "tshirt_X")
     print("T-shirts:")
     for name, (h, s) in COLORS.items():
@@ -270,7 +296,10 @@ def main():
     generate_variant(JEANS_SRC, "jeans_green", "lower_body",
                      lambda fr: colorize_image(fr, 0.33, 0.55))
 
-    # SNEAKERS
+    # SNEAKERS — shared item (one set serves both bodies), so male-only.
+    if BODY != "male":
+        print("Sneakers: skipped (shared item, male-only)")
+        return
     print("Sneakers:")
     generate_variant(SNEAKERS_SRC, "sneakers_red", "feet",
                      lambda fr: colorize_image(fr, 0.00, 0.75))

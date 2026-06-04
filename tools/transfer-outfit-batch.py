@@ -4,7 +4,7 @@ Generates equipped character frames for all directions/animations,
 then diffs against base to extract equipment overlays.
 """
 
-import base64, json, os, sys, time, requests
+import base64, io, json, os, sys, time, requests
 from PIL import Image
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,9 +15,13 @@ JOB_URL = "https://api.pixellab.ai/v2/background-jobs"
 TOKEN = os.environ["PIXELLAB_API_KEY"]
 HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
+# Body shape: selects which base frames to transfer onto and which overlay
+# subfolder to export into. Overridden by --body in main(). Clothing references
+# (REF_DIR) are body-agnostic flat-lays, so they are shared across bodies.
+BODY = "male"
 BASE_DIR = Path("tools/pixellab-downloads/v2/base-male-frames")
 REF_DIR = Path("tools/pixellab-downloads/v2/reference")
-OUT_DIR = Path("tools/pixellab-downloads/v2/transfer-results")
+OUT_DIR = Path("tools/pixellab-downloads/v2/transfer-results/male")
 OVERLAY_DIR = Path("src/client/public/sprites/equipment")
 
 DIRECTIONS = ["south", "south-east", "east", "north-east", "north", "north-west", "west", "south-west"]
@@ -51,9 +55,15 @@ def save_result_images(job_data, out_paths):
         if i >= len(out_paths):
             break
         raw = base64.b64decode(img_data["base64"])
-        w = img_data["width"]
-        h = len(raw) // (w * 4)
-        img = Image.frombytes("RGBA", (w, h), raw)
+        if raw[:8] == b"\x89PNG\r\n\x1a\n":
+            # Current API format: base64 is a PNG-encoded image.
+            img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        else:
+            # Legacy format: raw RGBA buffer. Prefer the reported height if
+            # present, else infer it from the byte length.
+            w = img_data["width"]
+            h = img_data.get("height") or (len(raw) // (w * 4))
+            img = Image.frombytes("RGBA", (w, h), raw)
         os.makedirs(os.path.dirname(out_paths[i]), exist_ok=True)
         img.save(out_paths[i])
 
@@ -203,7 +213,7 @@ def diff_and_export(item_id, item_cfg, base_palette=None):
 
     slot = item_cfg["slot"]
     result_dir = OUT_DIR / item_id
-    export_dir = OVERLAY_DIR / slot / item_id / "male"
+    export_dir = OVERLAY_DIR / slot / item_id / BODY
     os.makedirs(export_dir, exist_ok=True)
 
     if base_palette is None:
@@ -338,10 +348,43 @@ def diff_and_export(item_id, item_cfg, base_palette=None):
 
 
 def main():
-    args = [a for a in sys.argv[1:]]
-    export_only = "--export-only" in args
-    args = [a for a in args if not a.startswith("--")]
-    item_filter = args[0] if args else None
+    # Parse flags: --export-only, --body <male|female>, --anims <a,b,...>
+    # plus an optional positional item id filter.
+    raw = sys.argv[1:]
+    export_only = "--export-only" in raw
+    body = "male"
+    anims_filter = None
+    positionals = []
+    i = 0
+    while i < len(raw):
+        a = raw[i]
+        if a == "--body":
+            body = raw[i + 1]; i += 2
+        elif a.startswith("--body="):
+            body = a.split("=", 1)[1]; i += 1
+        elif a == "--anims":
+            anims_filter = raw[i + 1]; i += 2
+        elif a.startswith("--anims="):
+            anims_filter = a.split("=", 1)[1]; i += 1
+        elif a.startswith("--"):
+            i += 1  # ignore other flags (e.g. --export-only)
+        else:
+            positionals.append(a); i += 1
+    item_filter = positionals[0] if positionals else None
+
+    # Point the path/anim globals at the chosen body before any work runs.
+    global BODY, BASE_DIR, OUT_DIR, ANIMS
+    BODY = body
+    BASE_DIR = Path(f"tools/pixellab-downloads/v2/base-{BODY}-frames")
+    OUT_DIR = Path(f"tools/pixellab-downloads/v2/transfer-results/{BODY}")
+    if anims_filter:
+        ANIMS = [x.strip() for x in anims_filter.split(",") if x.strip()]
+    if not BASE_DIR.is_dir():
+        print(f"ERROR: base frames not found for body '{BODY}': {BASE_DIR}")
+        print(f"  (run: python tools/slice-base-frames.py {BODY})")
+        sys.exit(1)
+    print(f"Body: {BODY} | Anims: {ANIMS} | Base: {BASE_DIR}")
+
     items = {k: v for k, v in ITEMS.items() if not item_filter or k == item_filter}
 
     if export_only:
