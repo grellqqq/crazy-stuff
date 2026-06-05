@@ -168,6 +168,19 @@ export class IsoScene extends Phaser.Scene {
   private room: any = null;
   private authState: AuthState | null = null;
 
+  /**
+   * Dev-only body override. `?dev&char=female` (or female-dark, male-medium, …)
+   * forces the LOCAL avatar's body so equipment can be tested on any body shape
+   * without the two-tab slot dance. Ignored unless `?dev` is present and the key
+   * is valid; never affects remote players or the real login/lobby flow.
+   */
+  private readonly devCharOverride: string | null = (() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('dev')) return null;
+    const c = params.get('char');
+    return c && PL_CHAR_KEYS.includes(c) ? c : null;
+  })();
+
   private playerFacing = 'SD';
 
   private avatars = new Map<number, AvatarData>();
@@ -1110,7 +1123,7 @@ export class IsoScene extends Phaser.Scene {
     if (slot.occupied) {
       const isNew = !this.avatars.has(index);
       if (isNew) {
-        this.avatars.set(index, this.createAvatar(index));
+        this.avatars.set(index, this.createAvatar(index, slot.sessionId === this.mySessionId));
         // Dev mode: apply starter loadout for local player
         if (!this.authState && slot.sessionId === this.mySessionId) {
           const av = this.avatars.get(index)!;
@@ -1176,8 +1189,19 @@ export class IsoScene extends Phaser.Scene {
     }
   }
 
-  private createAvatar(slotIndex: number): AvatarData {
-    const config = SLOT_CHARACTERS[slotIndex % SLOT_CHARACTERS.length];
+  /**
+   * Resolve the {char, tint} config for an avatar. The local player honors the
+   * dev body override (?dev&char=…); everyone else uses their slot's character.
+   */
+  private slotConfigFor(slotIndex: number, isLocal: boolean): { char: CharacterDef; tint: number } {
+    if (isLocal && this.devCharOverride) {
+      return { char: makeCharDef(this.devCharOverride), tint: 0xffffff };
+    }
+    return SLOT_CHARACTERS[slotIndex % SLOT_CHARACTERS.length];
+  }
+
+  private createAvatar(slotIndex: number, isLocal = false): AvatarData {
+    const config = this.slotConfigFor(slotIndex, isLocal);
     const charDef = config.char;
 
     // Pick the initial texture — for multi-sheet chars, use the S direction sheet
@@ -1399,7 +1423,7 @@ export class IsoScene extends Phaser.Scene {
 
   /** Update sprite animation direction and tint based on state. */
   private updateAvatarVisual(av: AvatarData, isLocal: boolean): void {
-    const config = SLOT_CHARACTERS[av.slotIndex % SLOT_CHARACTERS.length];
+    const config = this.slotConfigFor(av.slotIndex, isLocal);
     const charDef = config.char;
     const dir = isLocal ? this.playerFacing : 'SD';
     const mapping = charDef.dirMap[dir];
