@@ -1200,6 +1200,23 @@ export class IsoScene extends Phaser.Scene {
     return SLOT_CHARACTERS[slotIndex % SLOT_CHARACTERS.length];
   }
 
+  /**
+   * Resolve the body CharacterDef for an avatar. Priority:
+   *   1. dev override (?dev&char=…) for the local player
+   *   2. the player's real selected character (`av.charKey`, set from the server
+   *      `playerLoadout` message) — the source of truth for body gender/skin
+   *   3. slot-based default (SLOT_CHARACTERS) — only a pre-loadout / guest fallback
+   *
+   * The body MUST follow `av.charKey`, not the slot index. Slots are reassigned as
+   * players join/leave, so a slot-keyed body renders the wrong gender and flips on
+   * every reassignment — it never matches the player's actual character.
+   */
+  private charDefFor(av: AvatarData, isLocal: boolean): CharacterDef {
+    if (isLocal && this.devCharOverride) return makeCharDef(this.devCharOverride);
+    if (av.charKey && PL_CHAR_KEYS.includes(av.charKey)) return makeCharDef(av.charKey);
+    return this.slotConfigFor(av.slotIndex, isLocal).char;
+  }
+
   private createAvatar(slotIndex: number, isLocal = false): AvatarData {
     const config = this.slotConfigFor(slotIndex, isLocal);
     const charDef = config.char;
@@ -1424,7 +1441,8 @@ export class IsoScene extends Phaser.Scene {
   /** Update sprite animation direction and tint based on state. */
   private updateAvatarVisual(av: AvatarData, isLocal: boolean): void {
     const config = this.slotConfigFor(av.slotIndex, isLocal);
-    const charDef = config.char;
+    // Body follows the player's real character (av.charKey), NOT the slot index.
+    const charDef = this.charDefFor(av, isLocal);
     const dir = isLocal ? this.playerFacing : 'SD';
     const mapping = charDef.dirMap[dir];
 
