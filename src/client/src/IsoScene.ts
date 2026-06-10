@@ -1258,7 +1258,7 @@ export class IsoScene extends Phaser.Scene {
 
   /** Set of equipment item IDs whose spritesheets are loaded or loading. */
   private loadedEquipment = new Set<string>();
-  /** Set of equipment item IDs currently being loaded (pending). */
+  /** Set of equipment item+body keys (`${itemId}_${body}`) currently being loaded (pending). */
   private loadingEquipment = new Set<string>();
 
   /**
@@ -1270,11 +1270,15 @@ export class IsoScene extends Phaser.Scene {
   private applyLoadout(av: AvatarData, loadout: Record<string, string>, charKey: string): void {
     av.loadout = { ...loadout };
 
-    // Collect items that need loading
-    const toLoad: string[] = [];
-    for (const itemId of Object.values(loadout)) {
-      if (!this.loadedEquipment.has(itemId) && !this.loadingEquipment.has(itemId)) {
-        toLoad.push(itemId);
+    // Collect items that need loading — keyed by item+body, because a male and
+    // a female avatar wearing the same item must NOT share textures (gendered
+    // items have different sprites per body shape).
+    const toLoad: { itemId: string; slot: string; eqKey: string; eqBody: string }[] = [];
+    for (const [slot, itemId] of Object.entries(loadout)) {
+      const eqBody = equipmentBodyKey(itemId, charKey);
+      const eqKey = `${itemId}_${eqBody}`;
+      if (!this.loadedEquipment.has(eqKey) && !this.loadingEquipment.has(eqKey)) {
+        toLoad.push({ itemId, slot, eqKey, eqBody });
       }
     }
 
@@ -1285,25 +1289,22 @@ export class IsoScene extends Phaser.Scene {
     }
 
     // Queue spritesheets for loading
-    for (const itemId of toLoad) {
-      this.loadingEquipment.add(itemId);
-      const slot = Object.entries(loadout).find(([, id]) => id === itemId)?.[0];
-      if (!slot) continue;
+    for (const { itemId, slot, eqKey, eqBody } of toLoad) {
+      this.loadingEquipment.add(eqKey);
       // Look up item metadata (frame size, available anims, body-shape variant).
       const item = ITEMS[itemId];
       const eqFrameSize = item?.frameSize ?? 92;
       const availableAnims = item?.availableAnims ?? ['walk', 'idle'];
-      const equipCharKey = equipmentBodyKey(itemId, charKey);
       for (const dir of PL_DIRS_LIST) {
-        const basePath = `/sprites/equipment/${slot}/${itemId}/${equipCharKey}`;
+        const basePath = `/sprites/equipment/${slot}/${itemId}/${eqBody}`;
         if (availableAnims.includes('walk'))
-          this.load.spritesheet(`equip_${itemId}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('run'))
-          this.load.spritesheet(`equip_${itemId}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('jump'))
-          this.load.spritesheet(`equip_${itemId}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('idle'))
-          this.load.spritesheet(`equip_${itemId}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
       }
     }
 
@@ -1312,11 +1313,11 @@ export class IsoScene extends Phaser.Scene {
     });
 
     this.load.once('complete', () => {
-      console.log(`[Equipment] load complete for: ${toLoad.join(', ')}`);
-      for (const itemId of toLoad) {
-        this.loadingEquipment.delete(itemId);
-        this.loadedEquipment.add(itemId);
-        this.registerEquipmentAnims(itemId);
+      console.log(`[Equipment] load complete for: ${toLoad.map((t) => t.eqKey).join(', ')}`);
+      for (const { eqKey } of toLoad) {
+        this.loadingEquipment.delete(eqKey);
+        this.loadedEquipment.add(eqKey);
+        this.registerEquipmentAnims(eqKey);
       }
       // Rebuild if avatar still exists — use fresh reference from map, not stale closure
       const freshAv = this.avatars.get(av.slotIndex);
@@ -1332,14 +1333,14 @@ export class IsoScene extends Phaser.Scene {
     this.load.start();
   }
 
-  /** Register Phaser animations for a loaded equipment item. */
-  private registerEquipmentAnims(itemId: string): void {
+  /** Register Phaser animations for a loaded equipment item+body key (e.g. 'worn_tshirt_female'). */
+  private registerEquipmentAnims(eqKey: string): void {
     const allDirs = ['S', 'SA', 'A', 'WA', 'W', 'WD', 'D', 'SD'];
     for (const dir of allDirs) {
       const suffix = DIR_TO_SUFFIX[dir];
       // Walk
-      const walkKey = `equip_${itemId}_${dir}`;
-      const walkTexture = `equip_${itemId}_${suffix}`;
+      const walkKey = `equip_${eqKey}_${dir}`;
+      const walkTexture = `equip_${eqKey}_${suffix}`;
       if (this.textures.exists(walkTexture) && !this.anims.exists(walkKey)) {
         this.anims.create({
           key: walkKey,
@@ -1348,8 +1349,8 @@ export class IsoScene extends Phaser.Scene {
         });
       }
       // Run
-      const runKey = `equip_${itemId}_run_${dir}`;
-      const runTexture = `equip_${itemId}_run_${suffix}`;
+      const runKey = `equip_${eqKey}_run_${dir}`;
+      const runTexture = `equip_${eqKey}_run_${suffix}`;
       if (this.textures.exists(runTexture) && !this.anims.exists(runKey)) {
         this.anims.create({
           key: runKey,
@@ -1358,8 +1359,8 @@ export class IsoScene extends Phaser.Scene {
         });
       }
       // Jump
-      const jumpKey = `equip_${itemId}_jump_${dir}`;
-      const jumpTexture = `equip_${itemId}_jump_${suffix}`;
+      const jumpKey = `equip_${eqKey}_jump_${dir}`;
+      const jumpTexture = `equip_${eqKey}_jump_${suffix}`;
       if (this.textures.exists(jumpTexture) && !this.anims.exists(jumpKey)) {
         this.anims.create({
           key: jumpKey,
@@ -1368,8 +1369,8 @@ export class IsoScene extends Phaser.Scene {
         });
       }
       // Idle
-      const idleKey = `equip_${itemId}_idle_${dir}`;
-      const idleTexture = `equip_${itemId}_idle_${suffix}`;
+      const idleKey = `equip_${eqKey}_idle_${dir}`;
+      const idleTexture = `equip_${eqKey}_idle_${suffix}`;
       if (this.textures.exists(idleTexture) && !this.anims.exists(idleKey)) {
         this.anims.create({
           key: idleKey,
@@ -1397,8 +1398,11 @@ export class IsoScene extends Phaser.Scene {
       const itemId = av.loadout[slot];
       if (!itemId) continue;
 
+      // Resolve this avatar's body-specific sprite set for the item.
+      const eqKey = `${itemId}_${equipmentBodyKey(itemId, charKey)}`;
+
       // Check if walk texture exists for this item (minimum requirement)
-      const testTexture = `equip_${itemId}_south`;
+      const testTexture = `equip_${eqKey}_south`;
       if (!this.textures.exists(testTexture)) continue;
 
       const equipSprite = this.add.sprite(0, 0, testTexture, 0);
@@ -1408,6 +1412,7 @@ export class IsoScene extends Phaser.Scene {
       equipSprite.setScale(equipScale);
       equipSprite.setOrigin(0.5, 0.85);
       equipSprite.setData('itemId', itemId);
+      equipSprite.setData('eqKey', eqKey);
       av.equipmentLayers.set(slot, equipSprite);
     }
 
@@ -1510,22 +1515,22 @@ export class IsoScene extends Phaser.Scene {
     const bodyFrame = av.bodySprite.anims.currentFrame;
 
     for (const [, equipSprite] of av.equipmentLayers) {
-      const itemId = equipSprite.getData('itemId') as string | undefined;
-      if (!itemId) continue;
+      const eqKey = equipSprite.getData('eqKey') as string | undefined;
+      if (!eqKey) continue;
 
       // Resolve equipment animation key with fallbacks
       let equipAnimKey: string;
       if (equipAnimType === 'walk') {
-        equipAnimKey = `equip_${itemId}_${dir}`;
+        equipAnimKey = `equip_${eqKey}_${dir}`;
       } else {
-        const specificKey = `equip_${itemId}_${equipAnimType}_${dir}`;
-        equipAnimKey = this.anims.exists(specificKey) ? specificKey : `equip_${itemId}_${dir}`;
+        const specificKey = `equip_${eqKey}_${equipAnimType}_${dir}`;
+        equipAnimKey = this.anims.exists(specificKey) ? specificKey : `equip_${eqKey}_${dir}`;
       }
 
       // Resolve with deeper fallback chain: run→walk, jump→walk, idle→walk
       if (!this.anims.exists(equipAnimKey)) {
         // Last resort: try walk anim for this direction
-        equipAnimKey = `equip_${itemId}_${dir}`;
+        equipAnimKey = `equip_${eqKey}_${dir}`;
       }
       if (!this.anims.exists(equipAnimKey)) {
         equipSprite.setAlpha(0);
@@ -2399,11 +2404,12 @@ export class IsoScene extends Phaser.Scene {
         if (slot === 'skin') continue;
         const itemId = equip[slot];
         if (!itemId) continue;
-        const eqTexKey = `equip_${itemId}_idle_south-east`;
+        const eqKey = `${itemId}_${equipmentBodyKey(itemId, charKey)}`;
+        const eqTexKey = `equip_${eqKey}_idle_south-east`;
         let eqTex = this.textures.get(eqTexKey);
         if (!eqTex || eqTex.key === '__MISSING') {
           // Fallback to walk texture
-          eqTex = this.textures.get(`equip_${itemId}_south-east`);
+          eqTex = this.textures.get(`equip_${eqKey}_south-east`);
         }
         if (!eqTex || eqTex.key === '__MISSING') continue;
         const eqFrame = eqTex.get(0);
