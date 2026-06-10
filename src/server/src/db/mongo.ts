@@ -1,4 +1,5 @@
 import { MongoClient, Db, ObjectId } from 'mongodb';
+import { ITEMS } from '../../../shared/items';
 
 const MONGODB_URI = process.env.MONGODB_URI ?? '';
 
@@ -37,11 +38,9 @@ export const EQUIPMENT_SLOTS = [
 
 const ALLOWED_CHARS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 
-const STARTER_ITEMS = [
-  { itemType: 'upper_body', itemId: 'worn_tshirt', rarity: 'common' },
-  { itemType: 'lower_body', itemId: 'blue_jeans', rarity: 'common' },
-  { itemType: 'feet', itemId: 'beatup_sneakers', rarity: 'common' },
-];
+// DEV / early-access grant: during development every player is given one of
+// every catalog item so the full wardrobe can be exercised in-game. Narrow this
+// to a real starter kit before launch (see ensureStarterItems).
 
 /** Face accessory is mutually exclusive with eyes + mouth accessories. */
 const FACE_CONFLICTS: Record<string, string[]> = {
@@ -100,10 +99,41 @@ export async function getUserById(userId: string) {
 
 // ─── Player functions ───────────────────────────────────────────────────────
 
+/**
+ * Ensure a player owns one of every catalog item (DEV/early-access grant).
+ *
+ * Idempotent: only inserts items the player doesn't already have, deduped by
+ * itemId. This backfills accounts created before items existed AND picks up any
+ * newly-added catalog items on the player's next login — without ever creating
+ * duplicates. Replace with a real starter kit before launch.
+ */
+async function ensureStarterItems(playerId: string): Promise<void> {
+  const inv = db.collection('inventory');
+  const owned = await inv.find({ playerId }).project({ itemId: 1 }).toArray();
+  const ownedIds = new Set(owned.map((d) => d.itemId));
+  const now = new Date();
+  for (const item of Object.values(ITEMS)) {
+    if (ownedIds.has(item.id)) continue;
+    await inv.insertOne({
+      playerId,
+      itemType: item.slot,
+      itemId: item.id,
+      rarity: item.rarity,
+      equipped: false,
+      obtainedAt: now,
+    });
+  }
+}
+
 export async function getOrCreatePlayer(userId: string, username: string) {
   const players = db.collection('players');
   let player = await players.findOne({ userId });
-  if (player) return player;
+  if (player) {
+    // Backfill catalog items for accounts created before they existed (and any
+    // items added to the catalog since this player last logged in).
+    await ensureStarterItems(player._id.toString());
+    return player;
+  }
 
   const now = new Date();
   const result = await players.insertOne({
@@ -121,20 +151,7 @@ export async function getOrCreatePlayer(userId: string, username: string) {
   });
 
   player = await players.findOne({ _id: result.insertedId });
-
-  // Add starter items
-  const inv = db.collection('inventory');
-  const playerId = result.insertedId.toString();
-  for (const item of STARTER_ITEMS) {
-    await inv.insertOne({
-      playerId,
-      itemType: item.itemType,
-      itemId: item.itemId,
-      rarity: item.rarity,
-      equipped: false,
-      obtainedAt: now,
-    });
-  }
+  await ensureStarterItems(result.insertedId.toString());
 
   return player;
 }
