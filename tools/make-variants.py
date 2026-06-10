@@ -274,12 +274,10 @@ def main():
     stripes = make_stripes_pattern(FRAME_SIZE)
     generate_variant(TSHIRT_SRC, "tshirt_stripes", "upper_body",
                      lambda fr: apply_pattern_frame(fr, stripes))
-    tiedye = make_tiedye_pattern(FRAME_SIZE)
-    generate_variant(TSHIRT_SRC, "tshirt_tiedye", "upper_body",
-                     lambda fr: apply_pattern_frame(fr, tiedye))
-    camo = make_digital_camo_pattern(FRAME_SIZE)
-    generate_variant(TSHIRT_SRC, "tshirt_camo", "upper_body",
-                     lambda fr: apply_pattern_frame(fr, camo))
+    # NOTE: tshirt_tiedye / tshirt_camo are NOT in src/shared/items.ts, so the
+    # game never loads them. Generation removed so orphan sprite dirs stop
+    # reappearing. To ship them: add catalog entries first, then restore
+    # generate_variant calls using make_tiedye_pattern / make_digital_camo_pattern.
 
     # JEANS / PANTS
     print("Pants:")
