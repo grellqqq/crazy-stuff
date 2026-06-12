@@ -23,7 +23,7 @@ FRAME_COUNTS = {"idle": 4, "walk": 6, "run": 6, "jump": 9}
 
 targets = set()
 for line in sys.stdin:
-    m = re.match(r"(\w+) (female|male) (\w+) ([a-z-]+) f\d+", line.strip())
+    m = re.match(r"(\w+) ((?:female|male)(?:-medium|-dark)?) (\w+) ([a-z-]+) f\d+", line.strip())
     if m:
         targets.add((m.group(1), m.group(2), m.group(3), m.group(4)))
 

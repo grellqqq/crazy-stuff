@@ -25,8 +25,8 @@ from PIL import Image, ImageDraw
 EQUIP_ROOT = Path("src/client/public/sprites/equipment")
 
 # Body shape: selects which base overlay folder to recolor from and write into.
-# Overridden by --body in main(). T-shirts and jeans are gendered (need both
-# bodies); sneakers are shared (male-only — skipped when BODY != "male").
+# Overridden by --body in main(). All three items (t-shirts, jeans, sneakers)
+# are fitted per body since v4 — run once per body key.
 BODY = "male"
 
 FRAME_SIZE = 92

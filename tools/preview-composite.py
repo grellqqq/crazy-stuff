@@ -197,7 +197,8 @@ def main():
             loadout = {"lower_body": "blue_jeans"}
         single_row(body, anim, direction, scale, loadout)
         return
-    for body in ("male", "female"):
+    for body in ("male", "female", "male-medium", "female-medium",
+                 "male-dark", "female-dark"):
         for anim in FULL_ANIMS:
             outfit_grid(body, anim)
         catalog_grid(body)

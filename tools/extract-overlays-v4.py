@@ -238,6 +238,13 @@ def feet_centroid(base):
     return float(xs[sel].mean()), float(ys[sel].mean())
 
 
+def body_centroid(base):
+    """Centroid of the whole body silhouette (for torso/leg garment borrow)."""
+    m = base[..., 3] > 8
+    ys, xs = np.nonzero(m)
+    return float(xs.mean()), float(ys.mean())
+
+
 def shift_rgba(arr, dx, dy):
     out = np.zeros_like(arr)
     src_y = slice(max(0, -dy), min(FS, FS - dy))
@@ -248,7 +255,7 @@ def shift_rgba(arr, dx, dy):
     return out
 
 
-def gen_item(item, body, cfg):
+def gen_item(item, body, cfg, bad=frozenset()):
     base_root = BASE_DIR.format(body=body)
     state_root = STATE_DIR.format(item=item, body=body)
     out_dir = OUT_DIR.format(slot=cfg["slot"], item=item, body=body)
@@ -284,12 +291,19 @@ def gen_item(item, body, cfg):
                     fr = fill_holes(fr, base, uw)
                 if cfg.get("uniform_shade"):
                     fr = uniform_shade(fr, base)
+                # FORCE-BORROW: source frames flagged by check-state-frames
+                # (dropped garment / wrong-garment render, e.g. red boots)
+                # produce garbage diffs no matter how many pixels they have —
+                # zero them so the borrow pass below replaces them.
+                if (item, anim, direction, fi) in bad:
+                    fr = np.zeros_like(fr)
                 frames.append(fr)
             # BORROW: the state renders occasionally drop a small garment on
             # 1-2 airborne frames (sneakers vanish at the jump apex). Borrow
             # the nearest good frame's overlay, shifted by the base feet/
             # body position delta so it lands on the limb.
             floor = 25 if cfg["slot"] == "feet" else 60
+            centroid = feet_centroid if cfg["slot"] == "feet" else body_centroid
             good = [i for i, fr in enumerate(frames)
                     if fr is not None and (fr[..., 3] > 8).sum() >= floor]
             if good:
@@ -299,11 +313,40 @@ def gen_item(item, body, cfg):
                     if bases[i] is None:
                         continue
                     j = min(good, key=lambda g: abs(g - i))
-                    cx_i, cy_i = feet_centroid(bases[i])
-                    cx_j, cy_j = feet_centroid(bases[j])
+                    cx_i, cy_i = centroid(bases[i])
+                    cx_j, cy_j = centroid(bases[j])
                     frames[i] = shift_rgba(frames[j],
                                            int(round(cx_i - cx_j)),
                                            int(round(cy_i - cy_j)))
+            else:
+                # WHOLE-ANIM dropout (every frame of this anim_dir lost the
+                # garment in the state render — seen on med/dark jump). Borrow
+                # frame 1 of another already-extracted anim of the SAME
+                # direction, shifted per-frame by the base-body centroid delta.
+                # ANIMS order puts idle/walk/run before jump, so their sheets
+                # are on disk by the time jump needs a donor.
+                for alt in ANIMS:
+                    if alt == anim:
+                        continue
+                    ap = f"{out_dir}/{alt}_{direction}.png"
+                    dbp = frame_path(base_root, alt, direction, 1)
+                    if not (os.path.exists(ap) and os.path.exists(dbp)):
+                        continue
+                    donor = load_rgba(ap)[:, :FS]
+                    if (donor[..., 3] > 8).sum() < floor:
+                        continue
+                    dbase = load_rgba(dbp)
+                    cx_j, cy_j = centroid(dbase)
+                    for i in range(len(frames)):
+                        if bases[i] is None:
+                            continue
+                        cx_i, cy_i = centroid(bases[i])
+                        frames[i] = shift_rgba(donor,
+                                               int(round(cx_i - cx_j)),
+                                               int(round(cy_i - cy_j)))
+                    print(f"    {anim}_{direction}: whole-anim dropout — "
+                          f"borrowed {alt} f1")
+                    break
             sheet = np.zeros((FS, FS * nf, 4), dtype=np.int16)
             for i, fr in enumerate(frames):
                 if fr is not None:
@@ -318,9 +361,21 @@ def gen_item(item, body, cfg):
     print(f"  mirrored west-side; missing frames: {missing}")
 
 
+def parse_bad_list(path, body):
+    """Parse check-state-frames output into {(item, anim, dir, frame)} for
+    this body. Lines look like: 'blue_jeans female-dark run east f3 (62px)'."""
+    import re
+    bad = set()
+    for line in open(path, encoding="utf-8", errors="replace"):
+        m = re.match(r"(\w+) ([a-z-]+) (\w+) ([a-z-]+) f(\d+)", line.strip())
+        if m and m.group(2) == body:
+            bad.add((m.group(1), m.group(3), m.group(4), int(m.group(5))))
+    return bad
+
+
 def main():
     raw = sys.argv[1:]
-    body, items = "female", []
+    body, items, bad_list = "female", [], None
     i = 0
     while i < len(raw):
         a = raw[i]
@@ -328,12 +383,17 @@ def main():
             body = raw[i + 1]; i += 2
         elif a.startswith("--body="):
             body = a.split("=", 1)[1]; i += 1
+        elif a == "--bad-list":
+            bad_list = raw[i + 1]; i += 2
         else:
             items.append(a); i += 1
     if not items:
         items = list(ITEMS.keys())
+    bad = parse_bad_list(bad_list, body) if bad_list else frozenset()
+    if bad:
+        print(f"force-borrowing {len(bad)} flagged source frames")
     for item in items:
-        gen_item(item, body, ITEMS[item])
+        gen_item(item, body, ITEMS[item], bad)
     print("DONE")
 
 

@@ -8,7 +8,7 @@ pixels on the STATE frame itself:
   beatup_sneakers — near-white pixels in the feet band
 
 Prints item-body anim_dir frame for every bad frame.
-Usage: python tools/check-state-frames.py [threshold_scale]
+Usage: python tools/check-state-frames.py [body ...]   (default: female male)
 """
 import os
 import sys
@@ -53,9 +53,11 @@ def garment_px(item, arr, anim=None):
 
 FLOORS = {"blue_jeans": 80, "worn_tshirt": 60, "beatup_sneakers": 12}
 
+BODIES = sys.argv[1:] or ["female", "male"]
+
 bad = []
 for item in ["worn_tshirt", "blue_jeans", "beatup_sneakers"]:
-    for body in ["female", "male"]:
+    for body in BODIES:
         root = f"tools/pixellab-downloads/v4/{item}-{body}"
         for anim, nf in ANIMS:
             for d in DIRS:
@@ -66,6 +68,28 @@ for item in ["worn_tshirt", "blue_jeans", "beatup_sneakers"]:
                         continue
                     arr = np.asarray(Image.open(p).convert("RGBA")).astype(np.int32)
                     n = garment_px(item, arr, anim)
+                    # WRONG-GARMENT detector: some state renders swap the
+                    # garment for red boots/jackets on individual directions.
+                    # Only count red that is NEW relative to the base frame —
+                    # base bodies legitimately contain small red areas (lips),
+                    # which the extraction diff cancels harmlessly.
+                    def red_mask(a):
+                        rr = a[..., 0]
+                        return ((a[..., 3] > 8) & (rr > 100) &
+                                (rr > a[..., 1] + 60) & (rr > a[..., 2] + 80))
+                    red = red_mask(arr)
+                    bp2 = f"tools/pixellab-downloads/v2/base-{body}-frames/{anim}_{d}_f{fi}.png"
+                    if os.path.exists(bp2):
+                        b_arr = np.asarray(
+                            Image.open(bp2).convert("RGBA")).astype(np.int32)
+                        bred = red_mask(b_arr)
+                        # dilate base red ±2px to absorb render jitter
+                        acc = bred.copy()
+                        for dy in range(-2, 3):
+                            for dx in range(-2, 3):
+                                acc |= np.roll(np.roll(bred, dy, 0), dx, 1)
+                        red &= ~acc
+                    nred = int(red.sum())
                     short = False
                     if item == "blue_jeans" and anim != "jump":
                         r2 = arr[..., 0].astype(np.int32)
@@ -73,8 +97,13 @@ for item in ["worn_tshirt", "blue_jeans", "beatup_sneakers"]:
                         shin = (arr[..., 3] > 8) & (b2 > r2 + 15) & (b2 > 60)
                         shin[:64, :] = False
                         short = int(shin.sum()) < 20
-                    if n < FLOORS[item] or short:
-                        why = "SHORTS" if short and n >= FLOORS[item] else f"{n}px"
+                    if n < FLOORS[item] or short or nred > 25:
+                        if nred > 25:
+                            why = f"RED{nred}px"
+                        elif short and n >= FLOORS[item]:
+                            why = "SHORTS"
+                        else:
+                            why = f"{n}px"
                         bad.append(f"{item} {body} {anim} {d} f{fi} ({why})")
 print("\n".join(bad) if bad else "ALL STATE FRAMES HAVE GARMENTS")
 print(f"\n{len(bad)} bad frames")

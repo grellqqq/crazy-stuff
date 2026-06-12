@@ -11,10 +11,24 @@
  */
 
 export type FitProfile =
-  /** One sprite set serves both body shapes (sneakers, hats, etc.). */
+  /** One sprite set serves all bodies (hats, held items, etc.). */
   | 'shared'
-  /** Separate male/female sprites required (torso/leg clothing). */
+  /**
+   * Separate sprites fitted per base body. The six bodies are distinct
+   * characters (different builds/poses), so each body key gets its own
+   * overlay folder: male, female, male-medium, female-medium, male-dark,
+   * female-dark.
+   */
   | 'gendered';
+
+/** All base body keys that have their own fitted equipment sprite sets. */
+export const BODY_KEYS = [
+  'male', 'female',
+  'male-medium', 'female-medium',
+  'male-dark', 'female-dark',
+] as const;
+
+export type BodyKey = (typeof BODY_KEYS)[number];
 
 export type EquipmentAnim = 'walk' | 'idle' | 'run' | 'jump';
 
@@ -73,10 +87,14 @@ export const ITEMS: Record<string, ItemDef> = {
 /**
  * Resolve which body sprite folder to load equipment from.
  * - `shared` items always load from /male/ (one set serves all bodies).
- * - `gendered` items pick male or female based on the character's body key.
+ * - `gendered` items load the overlay fitted to the character's exact body
+ *   (full body key, e.g. `female-medium`) — light-fitted overlays misalign
+ *   on the medium/dark bodies because the six bodies are distinct characters.
+ * Unknown body keys fall back to the light body of the matching gender.
  */
-export function equipmentBodyKey(itemId: string, charKey: string): 'male' | 'female' {
+export function equipmentBodyKey(itemId: string, charKey: string): BodyKey {
   const item = ITEMS[itemId];
   if (!item || item.fitProfile === 'shared') return 'male';
+  if ((BODY_KEYS as readonly string[]).includes(charKey)) return charKey as BodyKey;
   return charKey.startsWith('female') ? 'female' : 'male';
 }
