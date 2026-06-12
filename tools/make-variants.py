@@ -294,10 +294,7 @@ def main():
     generate_variant(JEANS_SRC, "jeans_green", "lower_body",
                      lambda fr: colorize_image(fr, 0.33, 0.55))
 
-    # SNEAKERS — shared item (one set serves both bodies), so male-only.
-    if BODY != "male":
-        print("Sneakers: skipped (shared item, male-only)")
-        return
+    # SNEAKERS — gendered since v4 (per-body aligned states).
     print("Sneakers:")
     generate_variant(SNEAKERS_SRC, "sneakers_red", "feet",
                      lambda fr: colorize_image(fr, 0.00, 0.75))

@@ -1295,16 +1295,21 @@ export class IsoScene extends Phaser.Scene {
       const item = ITEMS[itemId];
       const eqFrameSize = item?.frameSize ?? 92;
       const availableAnims = item?.availableAnims ?? ['walk', 'idle'];
+      // Dev cache-buster: sprite sheets are regenerated on disk during art
+      // iteration; without this the browser serves stale cached PNGs and
+      // art fixes silently "don't show up".
+      const bust = new URLSearchParams(window.location.search).has('dev')
+        ? `?v=${Date.now()}` : '';
       for (const dir of PL_DIRS_LIST) {
         const basePath = `/sprites/equipment/${slot}/${itemId}/${eqBody}`;
         if (availableAnims.includes('walk'))
-          this.load.spritesheet(`equip_${eqKey}_${dir}`, `${basePath}/walk_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_${dir}`, `${basePath}/walk_${dir}.png${bust}`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('run'))
-          this.load.spritesheet(`equip_${eqKey}_run_${dir}`, `${basePath}/run_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_run_${dir}`, `${basePath}/run_${dir}.png${bust}`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('jump'))
-          this.load.spritesheet(`equip_${eqKey}_jump_${dir}`, `${basePath}/jump_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_jump_${dir}`, `${basePath}/jump_${dir}.png${bust}`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
         if (availableAnims.includes('idle'))
-          this.load.spritesheet(`equip_${eqKey}_idle_${dir}`, `${basePath}/idle_${dir}.png`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
+          this.load.spritesheet(`equip_${eqKey}_idle_${dir}`, `${basePath}/idle_${dir}.png${bust}`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
       }
     }
 

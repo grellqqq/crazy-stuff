@@ -90,7 +90,18 @@ def overlay_frame(item_id, body, anim, direction, fi):
     return fr
 
 
+# The game never renders west-side textures: IsoScene reuses east-side sheets
+# with flipX for SA/A/WA facings (body AND equipment, kept in sync). Mirror
+# the composed east frame so previews match what players actually see.
+RUNTIME_MIRROR = {"west": "east", "south-west": "south-east",
+                  "north-west": "north-east"}
+
+
 def composed_frame(body, anim, direction, fi, loadout):
+    src = RUNTIME_MIRROR.get(direction)
+    if src:
+        from PIL import ImageOps
+        return ImageOps.mirror(composed_frame(body, anim, src, fi, loadout))
     base = Image.open(
         f"{BASE_FRAMES.format(body=body)}/{anim}_{direction}_f{fi + 1}.png"
     ).convert("RGBA")
@@ -176,10 +187,14 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     args = sys.argv[1:]
     if args and args[0] == "--row":
-        # --row <body> <anim> <dir> [scale] [bare]
+        # --row <body> <anim> <dir> [scale] [bare|jeans]
         body, anim, direction = args[1], args[2], args[3]
         scale = int(args[4]) if len(args) > 4 else 4
-        loadout = {} if "bare" in args else None
+        loadout = None
+        if "bare" in args:
+            loadout = {}
+        elif "jeans" in args:
+            loadout = {"lower_body": "blue_jeans"}
         single_row(body, anim, direction, scale, loadout)
         return
     for body in ("male", "female"):

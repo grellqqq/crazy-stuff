@@ -36,13 +36,13 @@ const FULL_ANIMS: EquipmentAnim[] = ['walk', 'idle', 'run', 'jump'];
 
 export const ITEMS: Record<string, ItemDef> = {
   // ─── feet (shared — sneakers fit either body) ───────────────────────────
-  beatup_sneakers: { id: 'beatup_sneakers', slot: 'feet', fitProfile: 'shared', displayName: 'Beat-up Sneakers', rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_black:  { id: 'sneakers_black',  slot: 'feet', fitProfile: 'shared', displayName: 'Black Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_blue:   { id: 'sneakers_blue',   slot: 'feet', fitProfile: 'shared', displayName: 'Blue Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_green:  { id: 'sneakers_green',  slot: 'feet', fitProfile: 'shared', displayName: 'Green Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_pink:   { id: 'sneakers_pink',   slot: 'feet', fitProfile: 'shared', displayName: 'Pink Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_red:    { id: 'sneakers_red',    slot: 'feet', fitProfile: 'shared', displayName: 'Red Sneakers',     rarity: 'common', availableAnims: FULL_ANIMS },
-  sneakers_yellow: { id: 'sneakers_yellow', slot: 'feet', fitProfile: 'shared', displayName: 'Yellow Sneakers',  rarity: 'common', availableAnims: FULL_ANIMS },
+  beatup_sneakers: { id: 'beatup_sneakers', slot: 'feet', fitProfile: 'gendered', displayName: 'Beat-up Sneakers', rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_black:  { id: 'sneakers_black',  slot: 'feet', fitProfile: 'gendered', displayName: 'Black Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_blue:   { id: 'sneakers_blue',   slot: 'feet', fitProfile: 'gendered', displayName: 'Blue Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_green:  { id: 'sneakers_green',  slot: 'feet', fitProfile: 'gendered', displayName: 'Green Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_pink:   { id: 'sneakers_pink',   slot: 'feet', fitProfile: 'gendered', displayName: 'Pink Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_red:    { id: 'sneakers_red',    slot: 'feet', fitProfile: 'gendered', displayName: 'Red Sneakers',     rarity: 'common', availableAnims: FULL_ANIMS },
+  sneakers_yellow: { id: 'sneakers_yellow', slot: 'feet', fitProfile: 'gendered', displayName: 'Yellow Sneakers',  rarity: 'common', availableAnims: FULL_ANIMS },
 
   // ─── head_accessory (shared — hats fit either body) ─────────────────────
   wizard_hat: { id: 'wizard_hat', slot: 'head_accessory', fitProfile: 'shared', displayName: 'Wizard Hat', rarity: 'common', frameSize: 132, availableAnims: ['walk', 'idle'] },
