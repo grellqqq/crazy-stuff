@@ -323,17 +323,17 @@ endpoint name is asymmetric (`/equip` covers both) — kept as-is for now, but
 flagged as a candidate for renaming to `/loadout` or `/equipment` if the API
 ever gets cleaned up.
 
-#### Atomicity caveat
+#### Atomicity caveat — RESOLVED (S1-49, 2026-06-12)
 
-The equip flow is **not transactional** — steps 3, 4, 5, and 6 are separate
-MongoDB operations. A server crash mid-flow could leave the inventory in an
-intermediate state (e.g., old item unequipped but new item not yet equipped,
-or new item equipped but `equippedLoadout` cache stale). `recomputeLoadout`
-is idempotent — it always rebuilds from the inventory truth — so the cache
-will self-heal on the next equip. The intermediate-state window is
-microseconds-long under normal conditions, and the worst observable symptom
-is "player sees an empty slot for a moment before the next sync." See §5
-(Edge Cases) for full enumeration.
+The equip flow now runs inside `session.withTransaction()` (see
+`withTransaction` in `src/server/src/db/mongo.ts`) — unequip-same-slot,
+conflict-unequip, equip, and loadout recompute commit or roll back as one
+unit. On a standalone server (no replica set) the helper falls back to the
+historical non-transactional behavior with a one-time warning; in that mode
+`recomputeLoadout`'s idempotence still self-heals the cache on the next
+equip. Production must run a replica set (single-node is fine) — this is
+also a hard requirement for the Gacha System's pull transaction
+(see [24-gacha-system.md](24-gacha-system.md) §3.1).
 
 #### Toggling rule (UI-level)
 

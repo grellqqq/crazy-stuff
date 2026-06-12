@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Created:** 2026-03-22
 **Total Systems:** 34
-**Designed:** 3 / 34
+**Designed:** 4 / 34
 
 > This index is the authoritative decomposition of the game into individual systems.
 > Each system should have its own GDD at `design/gdd/[system-slug].md`.
@@ -66,7 +66,7 @@
 
 | # | System | Phase | Status | GDD |
 |---|---|---|---|---|
-| 24 | Gacha System | 4 | Not Started | — |
+| 24 | Gacha System | 4 | Approved | [24-gacha-system.md](24-gacha-system.md) |
 | 25 | Store System | 4 | Not Started | — |
 | 26 | Payment Integration | 4 | Not Started | — |
 | 27 | Economy UI | 4 | Not Started | — |
@@ -123,7 +123,7 @@ LAYER 3 — Gameplay Features
   Button / Trap System    → Terrain, Race Room
   Pickup System           → Race Room, Item/Inventory
   Scoring System          → Race Room
-  Gacha System            → Item/Inventory, Currency, Database
+  Gacha System            → Item/Inventory, Database, Payment (soft — paid pulls only; Currency uninvolved at launch, see GDD §3.3)
   Store System            → Item/Inventory, Currency, Database
   Chat System             → Auth, Lobby/Crazy Town
   Emote System            → Avatar Renderer, Lobby/Crazy Town
@@ -210,9 +210,9 @@ add formulas, edge cases, and acceptance criteria needed before implementation.
 **Phase 1:** 1/7 systems designed
 **Phase 2:** 1/7 systems designed
 **Phase 3:** 0/6 systems designed
-**Phase 4:** 0/8 systems designed
+**Phase 4:** 1/8 systems designed
 
-**Overall:** 3/34 systems designed
+**Overall:** 4/34 systems designed
 
 *Update this tracker as system GDDs are completed. Mark Status as "In Progress",
 "Complete", or "Deferred" and add the GDD path.*
