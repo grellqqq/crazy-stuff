@@ -105,14 +105,17 @@ def audit_sheet(path, frame_size, n_frames, palette):
     return opaque_counts, bleed_counts, None
 
 
-BODIES = ["male", "female", "male-medium", "female-medium",
-          "male-dark", "female-dark"]
+# Gendered items ship male/female overlay sets only. Medium/dark bodies are
+# skin-recolors of the light bodies (tools/recolor-skin.py) with identical
+# silhouettes, so they reuse the light overlays at runtime — there are no
+# per-tone overlay folders to audit.
+OVERLAY_BODIES = ["male", "female"]
 
 
 def main():
     quiet = "--quiet" in sys.argv
     items = parse_items_ts()
-    palettes = {b: body_palette(b) for b in BODIES}
+    palettes = {b: body_palette(b) for b in OVERLAY_BODIES}
     errors, warns, infos = [], [], []
     variance_rows = []
 
@@ -126,7 +129,7 @@ def main():
                 errors.append(f"ORPHAN dir not in catalog: {slot_dir}/{item_dir}")
 
     for iid, it in sorted(items.items()):
-        expected_bodies = list(BODIES) if it["fit"] == "gendered" else ["male"]
+        expected_bodies = list(OVERLAY_BODIES) if it["fit"] == "gendered" else ["male"]
         item_root = f"{EQUIP_ROOT}/{it['slot']}/{iid}"
 
         # E2: body dirs on disk vs expected

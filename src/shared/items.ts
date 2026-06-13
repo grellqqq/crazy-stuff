@@ -87,14 +87,13 @@ export const ITEMS: Record<string, ItemDef> = {
 /**
  * Resolve which body sprite folder to load equipment from.
  * - `shared` items always load from /male/ (one set serves all bodies).
- * - `gendered` items load the overlay fitted to the character's exact body
- *   (full body key, e.g. `female-medium`) — light-fitted overlays misalign
- *   on the medium/dark bodies because the six bodies are distinct characters.
- * Unknown body keys fall back to the light body of the matching gender.
+ * - `gendered` items load the male or female overlay set. The medium/dark
+ *   bodies are palette-swapped copies of the light bodies (see
+ *   tools/recolor-skin.py), so their silhouettes are identical and the
+ *   light-body overlays fit every skin tone pixel-for-pixel.
  */
 export function equipmentBodyKey(itemId: string, charKey: string): BodyKey {
   const item = ITEMS[itemId];
   if (!item || item.fitProfile === 'shared') return 'male';
-  if ((BODY_KEYS as readonly string[]).includes(charKey)) return charKey as BodyKey;
   return charKey.startsWith('female') ? 'female' : 'male';
 }

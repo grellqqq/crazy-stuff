@@ -255,12 +255,18 @@ export class IsoScene extends Phaser.Scene {
   preload(): void {
     // PixelLab character sprites — 8 directions, 92×92 frames
     const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
+    // Dev cache-buster: base body sheets are regenerated on disk during art
+    // iteration (e.g. skin-tone recolors); without this the browser serves
+    // stale cached PNGs and the change silently "doesn't show up". Mirrors the
+    // equipment loader below.
+    const bust = new URLSearchParams(window.location.search).has('dev')
+      ? `?v=${Date.now()}` : '';
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
-        this.load.spritesheet(`${charKey}_${dir}`, `/sprites/characters/${charKey}/walk_${dir}.png`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_run_${dir}`, `/sprites/characters/${charKey}/run_${dir}.png`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_jump_${dir}`, `/sprites/characters/${charKey}/jump_${dir}.png`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_idle_${dir}`, `/sprites/characters/${charKey}/idle_${dir}.png`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_${dir}`, `/sprites/characters/${charKey}/walk_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_run_${dir}`, `/sprites/characters/${charKey}/run_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_jump_${dir}`, `/sprites/characters/${charKey}/jump_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_idle_${dir}`, `/sprites/characters/${charKey}/idle_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
       }
     }
 

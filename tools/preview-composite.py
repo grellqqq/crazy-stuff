@@ -73,7 +73,13 @@ def overlay_frame(item_id, body, anim, direction, fi):
     it = ITEMS[item_id]
     if anim not in it["anims"]:
         return None
-    eq_body = body if it["fit"] == "gendered" else "male"
+    # Mirror equipmentBodyKey (src/shared/items.ts): gendered items have only
+    # male/female overlay sets; medium/dark bodies are skin-recolors of the
+    # light bodies (identical silhouette) so they wear the light overlays.
+    if it["fit"] != "gendered":
+        eq_body = "male"
+    else:
+        eq_body = "female" if body.startswith("female") else "male"
     path = f"{EQUIP_ROOT}/{it['slot']}/{item_id}/{eq_body}/{anim}_{direction}.png"
     if path not in _sheet_cache:
         _sheet_cache[path] = Image.open(path).convert("RGBA") if os.path.exists(path) else None
