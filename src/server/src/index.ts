@@ -15,6 +15,7 @@ import { connectDB } from './db/mongo';
 import {
   getOrCreatePlayer, getPlayer, getEquippedChar, equipChar,
   getInventory, equipItem, unequipItem,
+  getGachaOdds, getGachaStatus, executePull, devGrantCredits, GachaError,
 } from './db/mongo';
 
 const app = express();
@@ -33,6 +34,39 @@ app.use(express.static(clientDist));
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+
+// Public gacha odds disclosure (no auth — catalog-derived, shown on the pull
+// screen). Gacha GDD §3.1 / AC10.
+app.get('/api/gacha/odds', (_req, res) => {
+  try {
+    res.json(getGachaOdds());
+  } catch (e) {
+    console.error('[API] gacha odds error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+});
+
+// Map a GachaError code → HTTP status + safe client message.
+const GACHA_HTTP: Record<string, { status: number; message: string }> = {
+  BAD_COUNT: { status: 400, message: 'Pull count must be 1, 5, or 10.' },
+  FREE_PULL_USED: { status: 409, message: 'Daily free pull already used. Come back tomorrow.' },
+  PAID_DISABLED: { status: 403, message: 'Paid pulls are not available yet.' },
+  INSUFFICIENT_CREDITS: { status: 402, message: 'Not enough pull credits.' },
+  NO_PLAYER: { status: 404, message: 'Player not found.' },
+  DEV_DISABLED: { status: 403, message: 'Dev grant disabled.' },
+  POOL_EMPTY: { status: 503, message: 'The gacha pool is empty.' },
+};
+
+function sendGachaError(res: express.Response, e: unknown): void {
+  const code = e instanceof GachaError ? e.code
+    : (e instanceof Error && e.message === 'POOL_EMPTY') ? 'POOL_EMPTY' : null;
+  if (code && GACHA_HTTP[code]) {
+    res.status(GACHA_HTTP[code].status).json({ error: code, message: GACHA_HTTP[code].message });
+  } else {
+    console.error('[API] gacha error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+}
 
 // All /api/player/:userId/* routes require a valid JWT whose subject matches :userId.
 // See design/gdd/03-authentication.md §3.7 for the contract.
@@ -101,6 +135,46 @@ app.post('/api/player/:userId/equip', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'db error' });
+  }
+});
+
+// Gacha — per-player machine state (free availability, pity, credits).
+app.get('/api/player/:userId/gacha', async (req, res) => {
+  try {
+    res.json(await getGachaStatus(req.params.userId));
+  } catch (e) {
+    sendGachaError(res, e);
+  }
+});
+
+// Gacha — execute a pull. Body: { pullId: string, count?: 1|5|10, paid?: bool }.
+// Free single when paid is falsy; paid batch otherwise.
+app.post('/api/player/:userId/gacha/pull', async (req, res) => {
+  try {
+    const { pullId, count, paid } = req.body ?? {};
+    if (!pullId || typeof pullId !== 'string') {
+      return res.status(400).json({ error: 'pullId required' });
+    }
+    const result = await executePull(req.params.userId, pullId, {
+      count: typeof count === 'number' ? count : 1,
+      paid: Boolean(paid),
+    });
+    res.json(result);
+  } catch (e) {
+    sendGachaError(res, e);
+  }
+});
+
+// DEV ONLY (env GACHA_DEV=1): grant pull credits to exercise multi-pull before
+// Payment Integration exists. 404s in production so it's invisible.
+app.post('/api/player/:userId/gacha/dev-credits', async (req, res) => {
+  if (process.env.GACHA_DEV !== '1') return res.status(404).json({ error: 'not found' });
+  try {
+    const amount = Number(req.body?.amount ?? 10);
+    const credits = await devGrantCredits(req.params.userId, amount);
+    res.json({ pullCredits: credits });
+  } catch (e) {
+    sendGachaError(res, e);
   }
 });
 

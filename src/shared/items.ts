@@ -34,6 +34,9 @@ export type EquipmentAnim = 'walk' | 'idle' | 'run' | 'jump';
 
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'crazy';
 
+/** Where an item can be acquired. Drives faucet eligibility (gacha pool, store). */
+export type ItemSource = 'gacha' | 'store' | 'starter' | 'event' | 'admin';
+
 export interface ItemDef {
   id: string;
   slot: string;
@@ -44,6 +47,12 @@ export interface ItemDef {
   frameSize?: number;
   /** Animations present on disk. Defaults to ['walk', 'idle']. */
   availableAnims?: EquipmentAnim[];
+  /**
+   * Acquisition sources. Omitted = available everywhere (default gacha+store).
+   * Set explicitly to restrict, e.g. ['store'] for a store-only item or
+   * ['event'] for a non-pullable event reward. See gacha GDD §3.1.
+   */
+  sources?: ItemSource[];
 }
 
 const FULL_ANIMS: EquipmentAnim[] = ['walk', 'idle', 'run', 'jump'];
@@ -96,4 +105,13 @@ export function equipmentBodyKey(itemId: string, charKey: string): BodyKey {
   const item = ITEMS[itemId];
   if (!item || item.fitProfile === 'shared') return 'male';
   return charKey.startsWith('female') ? 'female' : 'male';
+}
+
+/**
+ * Whether an item is eligible for the gacha pull pool. Items with no explicit
+ * `sources` default in; otherwise the list must include 'gacha'. The gacha
+ * engine (src/shared/gacha.ts) uses this to build the pool from the catalog.
+ */
+export function inGachaPool(item: ItemDef): boolean {
+  return item.sources === undefined || item.sources.includes('gacha');
 }

@@ -1,5 +1,9 @@
 import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb';
 import { ITEMS } from '../../../shared/items';
+import {
+  buildPool, pullBatch, computeOdds, cryptoRng, GACHA_CONFIG, RARITIES,
+  freeAvailable, nextMidnightUTC,
+} from '../../../shared/gacha';
 
 const MONGODB_URI = process.env.MONGODB_URI ?? '';
 
@@ -23,6 +27,9 @@ export async function connectDB(): Promise<Db> {
   await db.collection('users').createIndex({ googleSub: 1 }, { sparse: true });
   await db.collection('players').createIndex({ userId: 1 }, { unique: true });
   await db.collection('inventory').createIndex({ playerId: 1 });
+  // Gacha: pullId is the idempotency key (one pull request → one outcome).
+  await db.collection('pulls').createIndex({ pullId: 1 }, { unique: true });
+  await db.collection('pulls').createIndex({ userId: 1, createdAt: -1 });
 
   return db;
 }
@@ -86,9 +93,13 @@ export const EQUIPMENT_SLOTS = [
 
 const ALLOWED_CHARS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 
-// DEV / early-access grant: during development every player is given one of
-// every catalog item so the full wardrobe can be exercised in-game. Narrow this
-// to a real starter kit before launch (see ensureStarterItems).
+/**
+ * Starter kit granted (and auto-equipped) to every NEW account — replaces the
+ * old full-catalog dev grant at gacha launch (gacha GDD §3.1). One item per
+ * slot, no conflicts. Existing accounts are grandfathered (keep whatever they
+ * already own); they receive no starter grant and no catalog backfill.
+ */
+const STARTER_KIT = ['worn_tshirt', 'blue_jeans', 'beatup_sneakers'];
 
 /** Face accessory is mutually exclusive with eyes + mouth accessories. */
 const FACE_CONFLICTS: Record<string, string[]> = {
@@ -155,35 +166,37 @@ export async function getUserById(userId: string) {
  * newly-added catalog items on the player's next login — without ever creating
  * duplicates. Replace with a real starter kit before launch.
  */
-async function ensureStarterItems(playerId: string, session?: ClientSession): Promise<void> {
-  const inv = db.collection('inventory');
-  const owned = await inv.find({ playerId }, { session }).project({ itemId: 1 }).toArray();
-  const ownedIds = new Set(owned.map((d) => d.itemId));
-  const now = new Date();
-  const missing = Object.values(ITEMS)
-    .filter((item) => !ownedIds.has(item.id))
-    .map((item) => ({
+/**
+ * Grant the starter kit to a brand-new player and return the equipped loadout.
+ * Items are inserted already-equipped (one per slot, no conflicts) so a new
+ * player spawns dressed. Caller runs this inside the create transaction.
+ */
+async function grantStarterKit(
+  playerId: string, now: Date, session?: ClientSession,
+): Promise<Record<string, string>> {
+  const loadout: Record<string, string> = {};
+  const rows = STARTER_KIT.map((id) => {
+    const item = ITEMS[id];
+    loadout[item.slot] = item.id;
+    return {
       playerId,
       itemType: item.slot,
       itemId: item.id,
       rarity: item.rarity,
-      equipped: false,
+      equipped: true,
       obtainedAt: now,
-    }));
-  if (missing.length > 0) {
-    await inv.insertMany(missing, { session });
-  }
+      source: 'starter',
+    };
+  });
+  await db.collection('inventory').insertMany(rows, { session });
+  return loadout;
 }
 
 export async function getOrCreatePlayer(userId: string, username: string) {
   const players = db.collection('players');
   const existing = await players.findOne({ userId });
-  if (existing) {
-    // Backfill catalog items for accounts created before they existed (and any
-    // items added to the catalog since this player last logged in).
-    await withTransaction((session) => ensureStarterItems(existing._id.toString(), session));
-    return existing;
-  }
+  // Returning players are grandfathered: no starter grant, no catalog backfill.
+  if (existing) return existing;
 
   return withTransaction(async (session) => {
     const now = new Date();
@@ -197,11 +210,20 @@ export async function getOrCreatePlayer(userId: string, username: string) {
       totalWins: 0,
       equippedChar: 'male',
       equippedLoadout: {},
+      // Gacha state (gacha GDD §3.3).
+      pityCounter: 0,
+      lastFreePullAt: null,
+      pullCredits: 0,
       createdAt: now,
       updatedAt: now,
     }, { session });
 
-    await ensureStarterItems(result.insertedId.toString(), session);
+    const loadout = await grantStarterKit(result.insertedId.toString(), now, session);
+    await players.updateOne(
+      { _id: result.insertedId },
+      { $set: { equippedLoadout: loadout } },
+      { session },
+    );
 
     return players.findOne({ _id: result.insertedId }, { session });
   });
@@ -356,4 +378,139 @@ export async function unequipItem(userId: string, inventoryItemId: string) {
     }
     return result.modifiedCount > 0;
   });
+}
+
+// ─── Gacha (gacha GDD §24) ──────────────────────────────────────────────────
+
+/** Paid pulls stay off until Payment Integration + the regulation question
+ *  (GDD open Q1) land. Free daily pull always works. */
+const PAID_ENABLED = process.env.GACHA_PAID_ENABLED === '1';
+
+/** A typed error whose `.code` the HTTP layer maps to a client message. */
+export class GachaError extends Error {
+  constructor(public code: string) { super(code); this.name = 'GachaError'; }
+}
+
+/** Public odds disclosure (gacha GDD §3.1, edge case 3): renormalized tier
+ *  probabilities over the live catalog, plus item counts per tier. */
+export function getGachaOdds() {
+  const pool = buildPool();
+  const odds = computeOdds(pool);
+  const tiers = RARITIES.map((r) => ({
+    rarity: r,
+    count: pool[r].length,
+    probability: odds[r] ?? 0,
+  }));
+  return { tiers, prices: GACHA_CONFIG.prices, paidEnabled: PAID_ENABLED };
+}
+
+/** Per-player machine state for the UI (free availability, pity, credits). */
+export async function getGachaStatus(userId: string) {
+  const player = await db.collection('players').findOne({ userId });
+  if (!player) throw new GachaError('NO_PLAYER');
+  const now = new Date();
+  const avail = freeAvailable(player.lastFreePullAt, now);
+  return {
+    freeAvailable: avail,
+    nextFreeAt: avail ? null : nextMidnightUTC(now).toISOString(),
+    pityCounter: player.pityCounter ?? 0,
+    pityThreshold: GACHA_CONFIG.pityThreshold,
+    pullCredits: player.pullCredits ?? 0,
+    paidEnabled: PAID_ENABLED,
+  };
+}
+
+interface PullRequest { count: number; paid: boolean; }
+
+/**
+ * Execute one pull request (free single or paid batch) atomically and
+ * idempotently. Implements gacha GDD §3.1 + edge cases 1, 2, 5, 8, 9, 10.
+ *
+ * - `pullId` is the idempotency key: a retry returns the recorded outcome.
+ * - Free pulls (paid=false) are always count 1 and require free availability,
+ *   else FREE_PULL_USED (a double-tapped free pull never silently charges).
+ * - Paid pulls require PAID_ENABLED + enough credits; the whole batch is one
+ *   transaction so the 10-pull guarantee and mid-batch pity are atomic.
+ */
+export async function executePull(userId: string, pullId: string, req: PullRequest) {
+  const { paid } = req;
+  const count = paid ? req.count : 1;
+  if (![1, 5, 10].includes(count)) throw new GachaError('BAD_COUNT');
+
+  const pulls = db.collection('pulls');
+  const players = db.collection('players');
+  const inv = db.collection('inventory');
+
+  // Fast idempotency path (cheap; re-guarded by the unique index in the txn).
+  const prior = await pulls.findOne({ pullId });
+  if (prior) {
+    return { results: prior.results, pityCounter: prior.pityAfter, funding: prior.funding, idempotent: true };
+  }
+
+  if (paid && !PAID_ENABLED) throw new GachaError('PAID_DISABLED');
+
+  try {
+    return await withTransaction(async (session) => {
+      const player = await players.findOne({ userId }, { session });
+      if (!player) throw new GachaError('NO_PLAYER');
+
+      const now = new Date();
+      let funding: 'free' | 'credits';
+      if (!paid) {
+        if (!freeAvailable(player.lastFreePullAt, now)) throw new GachaError('FREE_PULL_USED');
+        funding = 'free';
+      } else {
+        if ((player.pullCredits ?? 0) < count) throw new GachaError('INSUFFICIENT_CREDITS');
+        funding = 'credits';
+      }
+
+      const pool = buildPool();
+      const pityBefore = player.pityCounter ?? 0;
+      const outcome = pullBatch({ pool, count, pityCounter: pityBefore, rng: cryptoRng });
+
+      // Grant items (gacha-sourced; never auto-equipped — player chooses).
+      const rows = outcome.results.map((r) => ({
+        playerId: player._id.toString(),
+        itemType: r.slot,
+        itemId: r.itemId,
+        rarity: r.rarity,
+        equipped: false,
+        obtainedAt: now,
+        source: 'gacha',
+      }));
+      await inv.insertMany(rows, { session });
+
+      const set: Record<string, unknown> = { pityCounter: outcome.pityCounter, updatedAt: now };
+      const update: Record<string, unknown> = { $set: set };
+      if (funding === 'free') set.lastFreePullAt = now;
+      else update.$inc = { pullCredits: -count };
+      await players.updateOne({ userId }, update, { session });
+
+      // Recording the pull (unique pullId) is the idempotency commit point.
+      await pulls.insertOne({
+        pullId, userId, count, paid, funding,
+        results: outcome.results, pityBefore, pityAfter: outcome.pityCounter,
+        createdAt: now,
+      }, { session });
+
+      return { results: outcome.results, pityCounter: outcome.pityCounter, funding };
+    });
+  } catch (e: any) {
+    // Concurrent request with the SAME pullId won the unique-index race.
+    if (e?.code === 11000) {
+      const rec = await pulls.findOne({ pullId });
+      if (rec) return { results: rec.results, pityCounter: rec.pityAfter, funding: rec.funding, idempotent: true };
+    }
+    throw e;
+  }
+}
+
+/** DEV ONLY (env GACHA_DEV=1): grant pull credits so multi-pull can be tested
+ *  in-game before Payment Integration exists. Never enabled in production. */
+export async function devGrantCredits(userId: string, amount: number) {
+  if (process.env.GACHA_DEV !== '1') throw new GachaError('DEV_DISABLED');
+  const n = Math.max(0, Math.min(100, Math.floor(amount)));
+  await db.collection('players').updateOne({ userId }, { $inc: { pullCredits: n }, $set: { updatedAt: new Date() } });
+  const player = await db.collection('players').findOne({ userId });
+  return player?.pullCredits ?? 0;
 }
