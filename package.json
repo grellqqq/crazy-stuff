@@ -8,11 +8,13 @@
   "scripts": {
     "dev": "npm run dev --workspace=src/client",
     "server": "npm run dev --workspace=src/server",
-    "test": "tsx --test tests/unit/*.test.ts"
+    "test": "tsx --test tests/unit/*.test.ts",
+    "test:integration": "tsx --test tests/integration/*.int.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "eslint": "^9.0.0",
+    "mongodb-memory-server": "^11.2.0",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0"

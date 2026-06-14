@@ -36,6 +36,13 @@ export async function connectDB(): Promise<Db> {
 
 export function getDB(): Db { return db; }
 
+/** Close the client and reset module state (tests / graceful shutdown). */
+export async function closeDB(): Promise<void> {
+  await client?.close();
+  db = undefined as unknown as Db;
+  client = undefined as unknown as MongoClient;
+}
+
 // ─── Transactions ───────────────────────────────────────────────────────────
 
 /**

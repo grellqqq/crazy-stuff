@@ -68,7 +68,7 @@ export const ITEMS: Record<string, ItemDef> = {
   sneakers_yellow: { id: 'sneakers_yellow', slot: 'feet', fitProfile: 'gendered', displayName: 'Yellow Sneakers',  rarity: 'common', availableAnims: FULL_ANIMS },
 
   // ─── head_accessory (shared — hats fit either body) ─────────────────────
-  wizard_hat: { id: 'wizard_hat', slot: 'head_accessory', fitProfile: 'shared', displayName: 'Wizard Hat', rarity: 'common', frameSize: 132, availableAnims: ['walk', 'idle'] },
+  wizard_hat: { id: 'wizard_hat', slot: 'head_accessory', fitProfile: 'shared', displayName: 'Wizard Hat', rarity: 'rare', frameSize: 132, availableAnims: ['walk', 'idle'] },
 
   // ─── lower_body (gendered — leg/hip shape differs) ──────────────────────
   blue_jeans:  { id: 'blue_jeans',  slot: 'lower_body', fitProfile: 'gendered', displayName: 'Blue Jeans',  rarity: 'common', availableAnims: FULL_ANIMS },
