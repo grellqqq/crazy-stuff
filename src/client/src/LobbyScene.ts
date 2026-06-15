@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
+import { ITEMS } from '../../shared/items';
 
 const PL_CHAR_KEYS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
@@ -36,6 +37,11 @@ export class LobbyScene extends Phaser.Scene {
   private buildingX = 0;
   private buildingY = 0;
   private ePrompt!: Phaser.GameObjects.Text;
+
+  private gachaX = 0;
+  private gachaY = 0;
+  private gachaPrompt!: Phaser.GameObjects.Text;
+  private gachaPanel: HTMLDivElement | null = null;
 
   private groundBounds = { left: 0, right: 0, top: 0, bottom: 0 };
   private charKey = DEFAULT_CHAR_KEY;
@@ -111,6 +117,11 @@ export class LobbyScene extends Phaser.Scene {
     this.buildingY = cy;
     this.drawBuilding(this.buildingX, this.buildingY);
 
+    // Gacha machine on the left
+    this.gachaX = 120;
+    this.gachaY = cy;
+    this.drawGachaMachine(this.gachaX, this.gachaY);
+
     // Register animations
     this.registerAnimations();
 
@@ -156,6 +167,24 @@ export class LobbyScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
+    // Gacha machine interact prompt
+    this.gachaPrompt = this.add.text(this.gachaX, this.gachaY - 70, '[E] Gacha', {
+      fontSize: '16px',
+      fontFamily: 'monospace',
+      color: '#ffdd44',
+      backgroundColor: '#000000aa',
+      padding: { x: 8, y: 4 },
+    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+
+    this.tweens.add({
+      targets: this.gachaPrompt,
+      scaleY: 1.08,
+      duration: 500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
     // Input
     const kb = this.input.keyboard!;
     this.keys = {
@@ -166,8 +195,11 @@ export class LobbyScene extends Phaser.Scene {
     };
     this.eKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.eKey.on('down', () => {
-      const dist = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
-      if (dist <= INTERACT_DIST) this.enterRace();
+      // Gacha machine takes priority when in range (it's the nearer object on its side).
+      const dGacha = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.gachaX, this.gachaY);
+      if (dGacha <= INTERACT_DIST) { this.toggleGacha(); return; }
+      const dRace = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
+      if (dRace <= INTERACT_DIST) this.enterRace();
     });
 
     const iKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.I);
@@ -263,9 +295,11 @@ export class LobbyScene extends Phaser.Scene {
       other.bubble?.setPosition(other.sprite.x, other.sprite.y - 70);
     }
 
-    // E prompt
+    // E prompts (race building + gacha machine)
     const dist = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
     this.ePrompt.setAlpha(dist <= INTERACT_DIST ? 1 : 0);
+    const dGacha = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.gachaX, this.gachaY);
+    this.gachaPrompt.setAlpha(dGacha <= INTERACT_DIST ? 1 : 0);
   }
 
   private resolveDir(w: boolean, a: boolean, s: boolean, d: boolean): string {
@@ -309,6 +343,49 @@ export class LobbyScene extends Phaser.Scene {
 
     this.add.text(bx, by - 56, 'CRAZY RACE', {
       fontSize: '12px', fontFamily: 'monospace', color: '#ff4466', fontStyle: 'bold',
+    }).setOrigin(0.5, 0.5).setDepth(6);
+  }
+
+  /** Draw a capsule-toy ("gachapon") machine. Placeholder art until real
+   *  pixel-art lands — see gacha GDD §24. */
+  private drawGachaMachine(gx: number, gy: number): void {
+    const g = this.add.graphics().setDepth(5);
+
+    // Ground shadow
+    g.fillStyle(0x000000, 0.3);
+    g.fillEllipse(gx, gy + 80, 86, 20);
+
+    // Machine body (rounded) + darker base
+    g.fillStyle(0xcc2244, 1);
+    g.fillRoundedRect(gx - 38, gy - 28, 76, 106, 12);
+    g.fillStyle(0x88142e, 1);
+    g.fillRoundedRect(gx - 38, gy + 42, 76, 36, 12);
+
+    // Capsule chamber: dark backing + translucent glass dome
+    g.fillStyle(0x1a2433, 1);
+    g.fillCircle(gx, gy - 18, 33);
+    g.fillStyle(0x88ccee, 0.35);
+    g.fillCircle(gx, gy - 18, 29);
+
+    // Capsules inside the dome
+    const caps: Array<[number, number, number]> = [
+      [0xffdd44, -12, -8], [0x44bb44, 11, -2], [0xff66aa, -4, 6],
+      [0x66aaff, 14, -14], [0xaa66ff, 0, -16],
+    ];
+    for (const [c, ox, oy] of caps) {
+      g.fillStyle(c, 1);
+      g.fillCircle(gx + ox, gy - 18 + oy, 7);
+    }
+
+    // Dispenser slot + turn knob
+    g.fillStyle(0x141414, 1);
+    g.fillRoundedRect(gx - 16, gy + 50, 32, 18, 4);
+    g.fillStyle(0xffdd44, 1);
+    g.fillCircle(gx + 24, gy + 30, 5);
+
+    // Label
+    this.add.text(gx, gy + 14, 'GACHA', {
+      fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
     }).setOrigin(0.5, 0.5).setDepth(6);
   }
 
@@ -551,6 +628,7 @@ export class LobbyScene extends Phaser.Scene {
     this.profileBtn = null;
     this.inventoryBtn = null;
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
+    if (this.gachaPanel) { this.gachaPanel.remove(); this.gachaPanel = null; }
     if (this.chatBox) { this.chatBox.remove(); this.chatBox = null; }
     this.destroyQueueUI();
     if (this.queueRoom) { this.queueRoom.leave(); this.queueRoom = null; }
@@ -1289,5 +1367,174 @@ export class LobbyScene extends Phaser.Scene {
         this.openInventory();
       }
     } catch { /* ignore */ }
+  }
+
+  // ─── Gacha (gacha GDD §24; walk-up machine, ceremony deferred to Economy UI) ──
+
+  private toggleGacha(): void {
+    if (this.gachaPanel) { this.gachaPanel.remove(); this.gachaPanel = null; return; }
+    this.openGacha();
+  }
+
+  private async openGacha(): Promise<void> {
+    if (this.gachaPanel) { this.gachaPanel.remove(); this.gachaPanel = null; }
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #1a1a2e; border: 2px solid #ffdd44; border-radius: 8px;
+      padding: 24px; width: 420px; max-height: 80vh; overflow-y: auto;
+      z-index: 9000; font-family: monospace; color: #eee;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    `;
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('keyup', (e) => e.stopPropagation());
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'X';
+    closeBtn.style.cssText = `
+      position: absolute; top: 8px; right: 12px; background: none; border: none;
+      color: #888; font-size: 18px; cursor: pointer; font-family: monospace; font-weight: bold;
+    `;
+    closeBtn.onclick = () => { this.gachaPanel?.remove(); this.gachaPanel = null; };
+    panel.appendChild(closeBtn);
+
+    const title = document.createElement('h2');
+    title.textContent = '\u{1F3B0} GACHA MACHINE';
+    title.style.cssText = 'margin: 0 0 16px; text-align: center; color: #ffdd44; font-size: 18px;';
+    panel.appendChild(title);
+
+    const content = document.createElement('div');
+    content.id = 'gacha-content';
+    panel.appendChild(content);
+
+    document.body.appendChild(panel);
+    this.gachaPanel = panel;
+    await this.renderGachaContent(content);
+  }
+
+  private async renderGachaContent(content: HTMLDivElement): Promise<void> {
+    const authId = this.authState?.session?.user?.id;
+    if (!authId) { content.innerHTML = '<p style="text-align:center;color:#888">Log in to pull.</p>'; return; }
+    content.innerHTML = '<p style="text-align:center;color:#888">Loading…</p>';
+    try {
+      const [statusRes, oddsRes] = await Promise.all([
+        fetch(`${this.apiBase()}/api/player/${authId}/gacha`, { headers: this.authHeader() }),
+        fetch(`${this.apiBase()}/api/gacha/odds`),
+      ]);
+      const status = await statusRes.json();
+      const odds = await oddsRes.json();
+      content.innerHTML = '';
+
+      // Odds table (only non-empty tiers, matching what the server discloses).
+      const oddsBox = document.createElement('div');
+      oddsBox.style.cssText = 'background:#12121e;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;';
+      oddsBox.innerHTML = '<div style="color:#aaa;margin-bottom:6px;">Current odds</div>' +
+        odds.tiers.filter((t: any) => t.count > 0).map((t: any) => {
+          const c = LobbyScene.RARITY_COLORS[t.rarity] ?? '#888';
+          return `<div style="display:flex;justify-content:space-between;">
+            <span style="color:${c};text-transform:capitalize;">${t.rarity} <span style="color:#666">(${t.count})</span></span>
+            <span>${(t.probability * 100).toFixed(2)}%</span></div>`;
+        }).join('');
+      content.appendChild(oddsBox);
+
+      // Pity meter.
+      const pity = document.createElement('div');
+      pity.style.cssText = 'font-size:12px;color:#aaa;margin-bottom:14px;text-align:center;';
+      pity.textContent = `Pity: ${status.pityCounter}/${status.pityThreshold} until guaranteed Epic+`;
+      content.appendChild(pity);
+
+      // Free pull button (the shippable path).
+      const freeBtn = document.createElement('button');
+      const setBtn = (b: HTMLButtonElement, enabled: boolean, label: string, color: string) => {
+        b.textContent = label;
+        b.disabled = !enabled;
+        b.style.cssText = `display:block;width:100%;margin:6px 0;padding:12px;border-radius:6px;
+          font-family:monospace;font-size:15px;font-weight:bold;cursor:${enabled ? 'pointer' : 'not-allowed'};
+          border:1px solid ${enabled ? color : '#444'};background:${enabled ? 'rgba(255,221,68,0.12)' : '#222'};
+          color:${enabled ? color : '#666'};`;
+      };
+      if (status.freeAvailable) {
+        setBtn(freeBtn, true, '\u{1F381} FREE DAILY PULL', '#ffdd44');
+      } else {
+        const when = status.nextFreeAt ? new Date(status.nextFreeAt).toUTCString().replace(/ GMT$/, ' UTC') : 'tomorrow';
+        setBtn(freeBtn, false, `Next free pull: ${when}`, '#ffdd44');
+      }
+      freeBtn.onclick = () => this.doPull(content, 1, false);
+      content.appendChild(freeBtn);
+
+      // Paid pulls — only when enabled (Payment Integration) or dev credits exist.
+      if (status.paidEnabled || status.pullCredits > 0) {
+        const credits = document.createElement('div');
+        credits.style.cssText = 'font-size:12px;color:#aaa;text-align:center;margin:10px 0 4px;';
+        credits.textContent = `Pull credits: ${status.pullCredits}`;
+        content.appendChild(credits);
+        for (const n of [1, 5, 10]) {
+          const b = document.createElement('button');
+          setBtn(b, status.pullCredits >= n, `Pull ×${n} (${n} credit${n > 1 ? 's' : ''})`, '#88ccff');
+          b.onclick = () => this.doPull(content, n, true);
+          content.appendChild(b);
+        }
+      }
+    } catch {
+      content.innerHTML = '<p style="text-align:center;color:#f88">Could not reach the gacha machine.</p>';
+    }
+  }
+
+  private async doPull(content: HTMLDivElement, count: number, paid: boolean): Promise<void> {
+    const authId = this.authState?.session?.user?.id;
+    if (!authId) return;
+    content.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = true));
+    try {
+      const resp = await fetch(`${this.apiBase()}/api/player/${authId}/gacha/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.authHeader() },
+        body: JSON.stringify({ pullId: crypto.randomUUID(), count, paid }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'background:#3a1a1a;color:#f88;padding:10px;border-radius:6px;margin-bottom:12px;text-align:center;font-size:13px;';
+        banner.textContent = data.message ?? 'Pull failed.';
+        content.prepend(banner);
+        await this.renderGachaContent(content);
+        return;
+      }
+      this.showPullResults(content, data.results);
+      // Reflect new items immediately if the inventory panel is open.
+      if (this.inventoryPanel) {
+        const invContent = document.getElementById('inventory-content') as HTMLDivElement | null;
+        if (invContent) await this.renderInventoryContent(invContent);
+      }
+    } catch {
+      await this.renderGachaContent(content);
+    }
+  }
+
+  private showPullResults(content: HTMLDivElement, results: Array<{ itemId: string; rarity: string }>): void {
+    content.innerHTML = '';
+    const reveal = document.createElement('div');
+    reveal.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:16px;';
+    for (const r of results) {
+      const color = LobbyScene.RARITY_COLORS[r.rarity] ?? '#888';
+      const name = ITEMS[r.itemId]?.displayName ?? r.itemId;
+      const card = document.createElement('div');
+      card.style.cssText = `border:2px solid ${color};border-radius:8px;padding:12px 10px;min-width:120px;text-align:center;background:#12121e;`;
+      // textContent (not innerHTML) for the data-derived rarity/name strings.
+      const tier = document.createElement('div');
+      tier.style.cssText = `color:${color};font-size:11px;text-transform:uppercase;font-weight:bold;`;
+      tier.textContent = r.rarity;
+      const label = document.createElement('div');
+      label.style.cssText = 'margin-top:6px;font-size:13px;';
+      label.textContent = name;
+      card.append(tier, label);
+      reveal.appendChild(card);
+    }
+    content.appendChild(reveal);
+    const again = document.createElement('button');
+    again.textContent = '← Back';
+    again.style.cssText = `display:block;width:100%;padding:12px;border-radius:6px;font-family:monospace;
+      font-size:15px;font-weight:bold;cursor:pointer;border:1px solid #ffdd44;background:rgba(255,221,68,0.12);color:#ffdd44;`;
+    again.onclick = () => this.renderGachaContent(content);
+    content.appendChild(again);
   }
 }
