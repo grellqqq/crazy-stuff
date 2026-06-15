@@ -584,13 +584,24 @@ export class LobbyScene extends Phaser.Scene {
     if (!el) return;
 
     const myId = this.queueRoom?.sessionId;
-    el.innerHTML = players.map(p => {
+    // Build with textContent — p.playerName is player-controlled (XSS-unsafe via innerHTML).
+    el.replaceChildren(...players.map(p => {
       const isMe = p.sessionId === myId;
       const status = p.ready ? '✓ Ready' : '○ Not Ready';
       const color = p.ready ? '#44ff44' : '#888';
-      const name = isMe ? `<b>${p.playerName} (you)</b>` : p.playerName;
-      return `<div style="margin: 6px 0; color: ${color};">${status} — ${name}</div>`;
-    }).join('');
+      const row = document.createElement('div');
+      row.style.cssText = `margin: 6px 0; color: ${color};`;
+      let nameNode: Node;
+      if (isMe) {
+        const b = document.createElement('b');
+        b.textContent = `${p.playerName} (you)`;
+        nameNode = b;
+      } else {
+        nameNode = document.createTextNode(p.playerName);
+      }
+      row.append(`${status} — `, nameNode);
+      return row;
+    }));
 
     // Update ready button text
     const btn = document.getElementById('queue-ready-btn') as HTMLButtonElement;
@@ -866,29 +877,38 @@ export class LobbyScene extends Phaser.Scene {
         return;
       }
       const p = await resp.json();
+      // Numbers are coerced (so a malicious non-numeric value can't inject markup),
+      // and the username goes through textContent below — never interpolated into innerHTML.
+      const lv = Number(p.level) || 1;
+      const xp = Number(p.xp) || 0;
+      const coins = Number(p.coins) || 0;
+      const races = Number(p.totalRaces) || 0;
+      const wins = Number(p.totalWins) || 0;
       container.innerHTML = `
         <div style="text-align: center; margin-bottom: 16px;">
-          <div style="font-size: 20px; font-weight: bold; color: #ffdd44;">Lv.${p.level} ${p.username}</div>
+          <div id="stats-name" style="font-size: 20px; font-weight: bold; color: #ffdd44;"></div>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
           <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
             <div style="color: #888; font-size: 11px;">XP</div>
-            <div style="color: #4488ff; font-weight: bold;">${p.xp}</div>
+            <div style="color: #4488ff; font-weight: bold;">${xp}</div>
           </div>
           <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
             <div style="color: #888; font-size: 11px;">Coins</div>
-            <div style="color: #ffcc44; font-weight: bold;">${p.coins}</div>
+            <div style="color: #ffcc44; font-weight: bold;">${coins}</div>
           </div>
           <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
             <div style="color: #888; font-size: 11px;">Races</div>
-            <div style="color: #eee; font-weight: bold;">${p.totalRaces ?? 0}</div>
+            <div style="color: #eee; font-weight: bold;">${races}</div>
           </div>
           <div style="background: #222; border-radius: 4px; padding: 10px; text-align: center;">
             <div style="color: #888; font-size: 11px;">Wins</div>
-            <div style="color: #44bb44; font-weight: bold;">${p.totalWins ?? 0}</div>
+            <div style="color: #44bb44; font-weight: bold;">${wins}</div>
           </div>
         </div>
       `;
+      const nameEl = container.querySelector('#stats-name');
+      if (nameEl) nameEl.textContent = `Lv.${lv} ${p.username ?? 'Player'}`;
     } catch {
       container.innerHTML = '<div style="color: #888; text-align: center;">Could not load profile</div>';
     }
@@ -1098,7 +1118,15 @@ export class LobbyScene extends Phaser.Scene {
 
     const div = document.createElement('div');
     div.style.cssText = 'margin: 3px 0;';
-    div.innerHTML = `<span style="color: #ffdd44; font-weight: bold;">${name}:</span> <span style="color: #ccc;">${msg}</span>`;
+    // textContent (never innerHTML) — name and msg are player-controlled; an
+    // innerHTML interpolation here is a stored-XSS account-takeover vector.
+    const nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'color: #ffdd44; font-weight: bold;';
+    nameSpan.textContent = `${name}:`;
+    const msgSpan = document.createElement('span');
+    msgSpan.style.cssText = 'color: #ccc;';
+    msgSpan.textContent = msg;
+    div.append(nameSpan, ' ', msgSpan);
     el.appendChild(div);
     el.scrollTop = el.scrollHeight;
   }
