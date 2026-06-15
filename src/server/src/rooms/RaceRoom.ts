@@ -57,6 +57,9 @@ const HOLE_PENALTY_CD  = 450;
 const CRUMBLE_DELAY_MS = 1500;
 const SLIDE_EXTRA_TILES = 1;
 const PUSH_STUN_MS = 200;
+const SHIELD_DURATION_MS = 4000;
+/** Max seconds of stamina regen credited per move (caps the post-stun burst). */
+const STAMINA_REGEN_MAX_STEP = 0.5;
 
 // ─── Per-player state ────────────────────────────────────────────────────────
 
@@ -310,8 +313,15 @@ export class RaceRoom extends Room<RaceState> {
     if (this.phase === RacePhase.Countdown && this.occupiedCount() < MIN_PLAYERS_TO_START) {
       this.cancelCountdown();
     }
-    if (this.phase === RacePhase.Racing && this.finishCountdown > 0) {
-      this.checkAllFinished();
+    if (this.phase === RacePhase.Racing) {
+      if (this.occupiedCount() === 0) {
+        // Everyone left before anyone finished — end the race so the room
+        // doesn't sit in Racing forever (was only checked when finishCountdown
+        // had already started, leaving a lone/empty room stuck).
+        this.endRace();
+      } else {
+        this.checkAllFinished();
+      }
     }
     // Recheck rematch majority when a player leaves during vote
     if (this.phase === RacePhase.Finished) {
@@ -466,20 +476,21 @@ export class RaceRoom extends Room<RaceState> {
 
   /** Start the rematch vote window. Auto-resets after timeout if no majority. */
   private async awardPlayers(results: RaceResult[]): Promise<void> {
-    try {
-      // awardPostRace and getOrCreatePlayer imported at top of file
-      for (const r of results) {
-        const authId = this.authIds.get(r.sessionId);
-        if (!authId) continue; // guest player, skip
+    // Fan the DB writes out in parallel — a sequential await-loop blocked the
+    // room's event loop for ~2 DB round-trips per player after every race.
+    await Promise.all(results.map(async (r) => {
+      const authId = this.authIds.get(r.sessionId);
+      if (!authId) return; // guest player, skip
+      try {
         await getOrCreatePlayer(authId, r.playerName);
         const xp = r.totalScore;
         const coins = Math.floor(r.totalScore / 2);
         await awardPostRace(authId, xp, coins, r.position === 1);
         console.log(`[RaceRoom] awarded ${r.playerName}: ${xp}xp, ${coins}coins`);
+      } catch (e) {
+        console.error(`[RaceRoom] award failed for ${r.playerName}:`, e);
       }
-    } catch (e) {
-      console.error('[RaceRoom] DB not available, skipping awards:', e);
-    }
+    }));
   }
 
   private startRematchVoteTimer(): void {
@@ -569,9 +580,12 @@ export class RaceRoom extends Room<RaceState> {
 
     const now = Date.now();
 
-    // Stamina regen (when not sprinting)
+    // Stamina regen (when not sprinting). Regen is move-driven, so the gap
+    // since the last move can be huge after a stun (hole freeze, long slime) —
+    // clamp the credited time so a single post-stun move can't instantly
+    // refill the whole bar (which erased the cost of sprinting).
     if (ps.lastStaminaRegen > 0 && !ps.sprinting) {
-      const elapsed = (now - ps.lastStaminaRegen) / 1000;
+      const elapsed = Math.min(STAMINA_REGEN_MAX_STEP, (now - ps.lastStaminaRegen) / 1000);
       ps.stamina = Math.min(STAMINA_MAX, ps.stamina + elapsed * STAMINA_REGEN_RATE);
     }
     ps.lastStaminaRegen = now;
@@ -616,6 +630,9 @@ export class RaceRoom extends Room<RaceState> {
     );
     if (blocker) {
       this.pushPlayer(blocker, delta, wantsSprint ? 2 : 1, sessionId);
+      // If the push failed (blocker was against a wall or another player), the
+      // destination is still occupied — don't move into it, or avatars stack.
+      if (blocker.tileX === newX && blocker.tileY === newY) return;
     }
 
     // Save current position as last safe spot
@@ -669,6 +686,10 @@ export class RaceRoom extends Room<RaceState> {
 
     ps.lastJumpTime = now;
     ps.lastMoveTime = now;
+    // Pre-jump tile is the safe spot, so landing in a hole respawns you just
+    // before the jump rather than wherever you last walked safely.
+    ps.lastSafeX = slot.tileX;
+    ps.lastSafeY = slot.tileY;
     slot.tileX = landX;
     slot.tileY = landY;
 
@@ -868,8 +889,8 @@ export class RaceRoom extends Room<RaceState> {
         break;
       case PickupType.Shield:
         ps.shieldActive = true;
-        // Shield expires after 8 seconds if not consumed
-        setTimeout(() => { if (ps.shieldActive) { ps.shieldActive = false; this.broadcastState(); } }, 4000);
+        // Shield expires after SHIELD_DURATION_MS if not consumed.
+        setTimeout(() => { if (ps.shieldActive) { ps.shieldActive = false; this.broadcastState(); } }, SHIELD_DURATION_MS);
         break;
       case PickupType.SlimeBomb:
         this.activateSlimeBomb(sessionId, slot);
@@ -991,8 +1012,10 @@ export class RaceRoom extends Room<RaceState> {
   private tryActivateButton(sessionId: string, px: number, py: number): void {
     const now = Date.now();
     for (const btn of this.buttons) {
-      // Activate if player is within 1 tile (handles diagonal movement skipping exact tile)
-      if (Math.abs(px - btn.x) > 1 || Math.abs(py - btn.y) > 1) continue;
+      // Exact-tile activation. Movement is tile-based (the server places the
+      // player on the exact tile), so a 3×3 proximity check fired buttons
+      // from tiles the player never stepped on — even through adjacent walls.
+      if (px !== btn.x || py !== btn.y) continue;
       if ((this.buttonCooldowns.get(btn.id) ?? 0) > now) continue;
       if (this.activeEffects.has(btn.id)) continue;
       this.activateButton(btn, sessionId);
