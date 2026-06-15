@@ -1,7 +1,31 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
-import { ITEMS } from '../../shared/items';
+import { ITEMS, equipmentBodyKey } from '../../shared/items';
 import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META } from './itemDisplay';
+
+// East-side direction suffixes the body actually renders (west mirrors east
+// via flipX). Equipment overlays load the same five and mirror identically.
+const EQUIP_SUFFIXES = ['south', 'south-east', 'east', 'north-east', 'north'];
+// Paste order for equipment layers over the body (back-most first).
+const LOBBY_LAYER_ORDER = [
+  'back', 'lower_body', 'feet', 'upper_body', 'hand_1h',
+  'face_accessory', 'eyes_accessory', 'mouth_accessory', 'hair',
+  'head_accessory', 'air_space',
+];
+
+interface OtherPlayer {
+  sprite: Phaser.GameObjects.Sprite;
+  label: Phaser.GameObjects.Text;
+  targetX: number;
+  targetY: number;
+  bubble?: Phaser.GameObjects.Text;
+  charKey: string;
+  facing: string;
+  moving: boolean;
+  loadout: Record<string, string>;
+  equip: Map<string, Phaser.GameObjects.Sprite>;
+  equipSig: string;
+}
 
 const PL_CHAR_KEYS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
@@ -57,9 +81,16 @@ export class LobbyScene extends Phaser.Scene {
   private inQueue = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private lobbyRoom: any = null;
-  private otherPlayers = new Map<string, { sprite: Phaser.GameObjects.Sprite; label: Phaser.GameObjects.Text; targetX: number; targetY: number; bubble?: Phaser.GameObjects.Text }>();
+  private otherPlayers = new Map<string, OtherPlayer>();
   private localBubble?: Phaser.GameObjects.Text;
   private playerLabel!: Phaser.GameObjects.Text;
+
+  // Local player's equipment layers (mirror the body sprite).
+  private myLoadout: Record<string, string> = {};
+  private myEquip = new Map<string, Phaser.GameObjects.Sprite>();
+  private myEquipSig = '';
+  private loadedEquip = new Set<string>();
+  private loadingEquip = new Set<string>();
   private lastSentX = 0;
   private lastSentY = 0;
   private lastSentMoving = false;
@@ -275,6 +306,8 @@ export class LobbyScene extends Phaser.Scene {
     // Update name label + speech bubble position
     this.playerLabel.setPosition(this.playerX, this.playerY - 55);
     this.localBubble?.setPosition(this.playerX, this.playerY - 70);
+    // Keep our equipment layers glued to the body.
+    this.syncEquip(this.myEquip, this.playerX, this.playerY, this.playerFacing, moving, 10);
 
     // Send position to lobby room — always send on movement state change
     if (this.lobbyRoom) {
@@ -294,6 +327,7 @@ export class LobbyScene extends Phaser.Scene {
       other.sprite.y += (other.targetY - other.sprite.y) * 0.15;
       other.label.setPosition(other.sprite.x, other.sprite.y - 55);
       other.bubble?.setPosition(other.sprite.x, other.sprite.y - 70);
+      this.syncEquip(other.equip, other.sprite.x, other.sprite.y, other.facing, other.moving, 9);
     }
 
     // E prompts (race building + gacha machine)
@@ -418,6 +452,119 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
+  // ─── Equipment layers (walk + idle; mirrors IsoScene, degrades gracefully) ──
+
+  /** 8-way direction key → body's east-side suffix + flipX. */
+  private equipDir(dir: string): { suffix: string; flip: boolean } {
+    const m = PIXELLAB_DIR_MAP[dir] ?? PIXELLAB_DIR_MAP['SD'];
+    return { suffix: m.sheetSuffix.slice(1), flip: m.flipX };
+  }
+
+  /** Body-specific texture/anim key for an item, or null if not layerable. */
+  private eqKeyFor(itemId: string, charKey: string): string | null {
+    const def = ITEMS[itemId];
+    if (!def || def.slot === 'skin') return null;
+    return `${itemId}_${equipmentBodyKey(itemId, charKey)}`;
+  }
+
+  /** Stable string that changes whenever the visible outfit/body changes. */
+  private equipSignature(loadout: Record<string, string>, charKey: string): string {
+    return charKey + '|' + LOBBY_LAYER_ORDER.map((sl) => loadout[sl] ?? '').join(',');
+  }
+
+  /** Load walk+idle sheets for every item in `loadout`, then run onReady. A
+   *  missing file just means that layer is skipped (body still shows). */
+  private ensureEquipLoaded(loadout: Record<string, string>, charKey: string, onReady: () => void): void {
+    const toLoad: Array<{ itemId: string; slot: string; eqKey: string }> = [];
+    for (const itemId of Object.values(loadout)) {
+      const eqKey = this.eqKeyFor(itemId, charKey);
+      if (!eqKey) continue;
+      if (this.loadedEquip.has(eqKey) || this.loadingEquip.has(eqKey)) continue;
+      toLoad.push({ itemId, slot: ITEMS[itemId].slot, eqKey });
+    }
+    if (toLoad.length === 0) { onReady(); return; }
+    const bust = new URLSearchParams(window.location.search).has('dev') ? `?v=${Date.now()}` : '';
+    for (const { itemId, slot, eqKey } of toLoad) {
+      this.loadingEquip.add(eqKey);
+      const eqBody = eqKey.slice(itemId.length + 1);
+      const fs = ITEMS[itemId]?.frameSize ?? 92;
+      for (const suf of EQUIP_SUFFIXES) {
+        const base = `/sprites/equipment/${slot}/${itemId}/${eqBody}`;
+        this.load.spritesheet(`equip_${eqKey}_walk_${suf}`, `${base}/walk_${suf}.png${bust}`, { frameWidth: fs, frameHeight: fs });
+        this.load.spritesheet(`equip_${eqKey}_idle_${suf}`, `${base}/idle_${suf}.png${bust}`, { frameWidth: fs, frameHeight: fs });
+      }
+    }
+    this.load.once('complete', () => {
+      for (const { eqKey } of toLoad) {
+        this.loadingEquip.delete(eqKey);
+        this.loadedEquip.add(eqKey);
+        this.registerEquipAnims(eqKey);
+      }
+      onReady();
+    });
+    this.load.start();
+  }
+
+  private registerEquipAnims(eqKey: string): void {
+    for (const suf of EQUIP_SUFFIXES) {
+      const w = `equip_${eqKey}_walk_${suf}`;
+      if (this.textures.exists(w) && !this.anims.exists(`a_${w}`)) {
+        this.anims.create({ key: `a_${w}`, frames: this.anims.generateFrameNumbers(w, { start: 0, end: 5 }), frameRate: 10, repeat: -1 });
+      }
+      const i = `equip_${eqKey}_idle_${suf}`;
+      if (this.textures.exists(i) && !this.anims.exists(`a_${i}`)) {
+        this.anims.create({ key: `a_${i}`, frames: this.anims.generateFrameNumbers(i, { start: 0, end: 3 }), frameRate: 4, repeat: -1 });
+      }
+    }
+  }
+
+  /** Destroy and recreate a player's equipment layer sprites from their loadout. */
+  private rebuildEquip(target: Map<string, Phaser.GameObjects.Sprite>, loadout: Record<string, string>, charKey: string, baseDepth: number): void {
+    for (const [, s] of target) s.destroy();
+    target.clear();
+    let idx = 1;
+    for (const slot of LOBBY_LAYER_ORDER) {
+      const itemId = loadout[slot];
+      if (!itemId) continue;
+      const eqKey = this.eqKeyFor(itemId, charKey);
+      if (!eqKey) continue;
+      const tex = `equip_${eqKey}_idle_south`;
+      if (!this.textures.exists(tex)) continue; // not loaded / file missing
+      const fs = ITEMS[itemId]?.frameSize ?? 92;
+      const sprite = this.add.sprite(0, 0, tex, 0)
+        .setScale(0.75 * (92 / fs)).setOrigin(0.5, 0.85).setDepth(baseDepth + 0.001 * idx);
+      sprite.setData('eqKey', eqKey);
+      target.set(slot, sprite);
+      idx++;
+    }
+  }
+
+  /** Glue equipment layers to a body's position and play the matching anim. */
+  private syncEquip(target: Map<string, Phaser.GameObjects.Sprite>, x: number, y: number, dir: string, moving: boolean, baseDepth: number): void {
+    if (target.size === 0) return;
+    const { suffix, flip } = this.equipDir(dir);
+    let idx = 1;
+    for (const [, s] of target) {
+      s.setPosition(x, y);
+      s.setFlipX(flip);
+      s.setDepth(baseDepth + 0.001 * idx);
+      const eqKey = s.getData('eqKey');
+      const animKey = `a_equip_${eqKey}_${moving ? 'walk' : 'idle'}_${suffix}`;
+      if (this.anims.exists(animKey) && s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
+      idx++;
+    }
+  }
+
+  /** Rebuild the local player's equipment layers after a loadout/char change. */
+  private refreshMyEquip(): void {
+    const sig = this.equipSignature(this.myLoadout, this.charKey);
+    if (sig === this.myEquipSig && (this.myEquip.size > 0 || Object.keys(this.myLoadout).length === 0)) return;
+    this.ensureEquipLoaded(this.myLoadout, this.charKey, () => {
+      this.rebuildEquip(this.myEquip, this.myLoadout, this.charKey, 10);
+      this.myEquipSig = this.equipSignature(this.myLoadout, this.charKey);
+    });
+  }
+
   private async connectLobby(): Promise<void> {
     const { Client } = await import('colyseus.js');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -435,44 +582,64 @@ export class LobbyScene extends Phaser.Scene {
     // resolved before the room finished connecting.
     this.lobbyRoom.send('changeChar', { charKey: this.charKey });
 
-    this.lobbyRoom.onMessage('lobbyState', (data: { players: { sessionId: string; playerName: string; x: number; y: number; facing: string; moving: boolean; charKey: string }[] }) => {
+    this.lobbyRoom.onMessage('lobbyState', (data: { players: { sessionId: string; playerName: string; x: number; y: number; facing: string; moving: boolean; charKey: string; loadout?: Record<string, string> }[] }) => {
       const myId = this.lobbyRoom?.sessionId;
       const seen = new Set<string>();
 
       for (const p of data.players) {
-        if (p.sessionId === myId) continue;
+        if (p.sessionId === myId) {
+          // Our own loadout is server-authoritative — keep local layers in sync.
+          this.myLoadout = p.loadout ?? {};
+          this.refreshMyEquip();
+          continue;
+        }
         seen.add(p.sessionId);
+
+        const charKey = p.charKey || 'male';
+        const facing = p.facing || 'SD';
+        const loadout = p.loadout ?? {};
 
         let other = this.otherPlayers.get(p.sessionId);
         if (!other) {
-          const sprite = this.add.sprite(p.x, p.y, `${p.charKey}_south-east`)
+          const sprite = this.add.sprite(p.x, p.y, `${charKey}_south-east`)
             .setScale(0.75).setOrigin(0.5, 0.85).setDepth(9);
           const label = this.add.text(p.x, p.y - 55, p.playerName, {
             fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
           }).setOrigin(0.5, 1).setDepth(9);
-          other = { sprite, label, targetX: p.x, targetY: p.y };
+          other = {
+            sprite, label, targetX: p.x, targetY: p.y,
+            charKey, facing, moving: !!p.moving, loadout, equip: new Map(), equipSig: '',
+          };
           this.otherPlayers.set(p.sessionId, other);
         }
 
         other.targetX = p.x;
         other.targetY = p.y;
+        other.charKey = charKey;
+        other.facing = facing;
+        other.moving = !!p.moving;
+        other.loadout = loadout;
 
-        // Update animation
-        const charKey = p.charKey || 'male';
-        const facing = p.facing || 'SD';
+        // Body animation
         const flip = PIXELLAB_DIR_MAP[facing]?.flipX ?? false;
         if (p.moving) {
           const walkKey = `${charKey}_walk_${facing}`;
-          if (other.sprite.anims.currentAnim?.key !== walkKey) {
-            other.sprite.play(walkKey, true);
-          }
+          if (other.sprite.anims.currentAnim?.key !== walkKey) other.sprite.play(walkKey, true);
         } else {
           const idleKey = `${charKey}_idle_${facing}`;
-          if (!other.sprite.anims.currentAnim?.key.includes('idle')) {
-            other.sprite.play(idleKey, true);
-          }
+          if (!other.sprite.anims.currentAnim?.key.includes('idle')) other.sprite.play(idleKey, true);
         }
         other.sprite.setFlipX(flip);
+
+        // Rebuild this player's equipment layers when their outfit/body changes.
+        const sig = this.equipSignature(loadout, charKey);
+        if (sig !== other.equipSig) {
+          const o = other;
+          this.ensureEquipLoaded(loadout, charKey, () => {
+            this.rebuildEquip(o.equip, o.loadout, o.charKey, 9);
+            o.equipSig = this.equipSignature(o.loadout, o.charKey);
+          });
+        }
       }
 
       // Remove disconnected players
@@ -480,6 +647,8 @@ export class LobbyScene extends Phaser.Scene {
         if (!seen.has(sid)) {
           other.sprite.destroy();
           other.label.destroy();
+          other.bubble?.destroy();
+          for (const [, s] of other.equip) s.destroy();
           this.otherPlayers.delete(sid);
         }
       }
@@ -651,8 +820,12 @@ export class LobbyScene extends Phaser.Scene {
     for (const other of this.otherPlayers.values()) {
       other.sprite.destroy();
       other.label.destroy();
+      other.bubble?.destroy();
+      for (const [, s] of other.equip) s.destroy();
     }
     this.otherPlayers.clear();
+    for (const [, s] of this.myEquip) s.destroy();
+    this.myEquip.clear();
   }
 
   /** Build the API base URL for REST calls. */
@@ -713,6 +886,8 @@ export class LobbyScene extends Phaser.Scene {
 
     // Update local sprite animation
     this.player.play(`${this.charKey}_idle_${this.playerFacing}`, true);
+    // Equipment is body-keyed (male vs female overlays) — re-key our layers.
+    this.refreshMyEquip();
 
     // Tell the lobby room so other players see the change
     if (this.lobbyRoom) {
