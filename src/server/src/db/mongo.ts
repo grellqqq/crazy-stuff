@@ -314,8 +314,18 @@ export async function getInventory(userId: string) {
     .find({ playerId: player._id.toString() })
     .sort({ obtainedAt: -1 })
     .toArray();
-  // Map _id to id for client compatibility
-  return items.map(i => ({ ...i, id: i._id.toString() }));
+  // Normalize to the snake_case shape both client UIs (and the dev fixture)
+  // read. The DB stores camelCase (itemType/itemId); returning the raw doc
+  // made every inventory card render a blank name + empty equipment panel.
+  return items.map((i) => ({
+    id: i._id.toString(),
+    item_type: i.itemType,
+    item_id: i.itemId,
+    rarity: i.rarity,
+    equipped: i.equipped ?? false,
+    obtainedAt: i.obtainedAt,
+    source: i.source,
+  }));
 }
 
 export async function addItem(userId: string, itemType: string, itemId: string, rarity: string) {

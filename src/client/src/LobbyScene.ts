@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
 import { ITEMS } from '../../shared/items';
+import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META } from './itemDisplay';
 
 const PL_CHAR_KEYS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
@@ -1277,38 +1278,11 @@ export class LobbyScene extends Phaser.Scene {
     const slotGrid = document.createElement('div');
     slotGrid.style.cssText = 'display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 1;';
 
-    const slotKeys = Object.keys(LobbyScene.SLOT_META);
-    for (const slotKey of slotKeys) {
-      const meta = LobbyScene.SLOT_META[slotKey];
-      const equipped = equippedBySlot.get(slotKey);
-
-      const slot = document.createElement('div');
-      const borderColor = equipped ? (LobbyScene.RARITY_COLORS[equipped.rarity] ?? '#555') : '#2a2a3a';
-      slot.style.cssText = `
-        background: ${equipped ? '#1e1e30' : '#131320'}; border: 2px solid ${borderColor};
-        border-radius: 6px; padding: 6px 4px; text-align: center; cursor: ${equipped ? 'pointer' : 'default'};
-        min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      `;
-
-      if (equipped) {
-        slot.innerHTML = `
-          <div style="font-size: 16px; margin-bottom: 2px;">${meta.icon}</div>
-          <div style="font-size: 10px; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;">${equipped.item_id}</div>
-          <div style="font-size: 9px; color: ${borderColor}; text-transform: capitalize;">${equipped.rarity}</div>
-        `;
-        slot.title = `${meta.label}: ${equipped.item_id} (${equipped.rarity}) - Click to unequip`;
-        slot.onmouseenter = () => { slot.style.borderColor = '#ffdd44'; };
-        slot.onmouseleave = () => { slot.style.borderColor = borderColor; };
-        slot.onclick = () => this.toggleEquipItem(equipped.id, false, container);
-      } else {
-        slot.innerHTML = `
-          <div style="font-size: 16px; opacity: 0.3; margin-bottom: 2px;">${meta.icon}</div>
-          <div style="font-size: 9px; color: #444;">${meta.label}</div>
-        `;
-        slot.title = `${meta.label}: empty`;
-      }
-
-      slotGrid.appendChild(slot);
+    for (const slotKey of Object.keys(ITEM_SLOT_META)) {
+      slotGrid.appendChild(buildEquipSlot(
+        slotKey, equippedBySlot.get(slotKey) ?? null, this.charKey,
+        (id) => this.toggleEquipItem(id, false, container),
+      ));
     }
 
     equipRow.appendChild(slotGrid);
@@ -1337,36 +1311,10 @@ export class LobbyScene extends Phaser.Scene {
       bagGrid.style.cssText = 'display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;';
 
       for (const item of items) {
-        const card = document.createElement('div');
-        const borderColor = LobbyScene.RARITY_COLORS[item.rarity] ?? '#444';
-        const isEquipped = !!item.equipped;
-        card.style.cssText = `
-          background: ${isEquipped ? '#1e1e30' : '#181828'}; border: 2px solid ${borderColor};
-          border-radius: 6px; padding: 8px 4px; text-align: center; cursor: pointer; position: relative;
-        `;
-
-        const slotMeta = LobbyScene.SLOT_META[item.item_type];
-        const slotIcon = slotMeta?.icon ?? '?';
-        const slotLabel = slotMeta?.label ?? item.item_type;
-
-        card.innerHTML = `
-          <div style="width: 36px; height: 36px; background: ${borderColor}22; border-radius: 4px;
-            margin: 0 auto 4px; display: flex; align-items: center; justify-content: center;
-            font-size: 18px;">${slotIcon}</div>
-          <div style="font-size: 10px; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.item_id}</div>
-          <div style="font-size: 9px; color: ${borderColor}; text-transform: capitalize;">${item.rarity}</div>
-          <div style="font-size: 9px; color: #555; margin-top: 2px;">${slotLabel}</div>
-          ${isEquipped ? '<div style="font-size: 9px; color: #ffdd44; margin-top: 2px; font-weight: bold;">EQUIPPED</div>' : ''}
-        `;
-
-        card.title = isEquipped
-          ? `${item.item_id} (${item.rarity} ${slotLabel}) - Click to unequip`
-          : `${item.item_id} (${item.rarity} ${slotLabel}) - Click to equip`;
-
-        card.onmouseenter = () => { card.style.borderColor = '#ffdd44'; };
-        card.onmouseleave = () => { card.style.borderColor = borderColor; };
-        card.onclick = () => this.toggleEquipItem(item.id, !isEquipped, container);
-        bagGrid.appendChild(card);
+        bagGrid.appendChild(buildBagCard(
+          item, this.charKey,
+          (id, equip) => this.toggleEquipItem(id, equip, container),
+        ));
       }
 
       bagSection.appendChild(bagGrid);
