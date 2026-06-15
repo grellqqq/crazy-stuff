@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
 import { ITEMS, equipmentBodyKey } from '../../shared/items';
-import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META } from './itemDisplay';
+import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META, drawItemThumbnail, RARITY_COLORS } from './itemDisplay';
 
 // East-side direction suffixes the body actually renders (west mirrors east
 // via flipX). Equipment overlays load the same five and mirror identically.
@@ -1661,7 +1661,8 @@ export class LobbyScene extends Phaser.Scene {
         await this.renderGachaContent(content);
         return;
       }
-      this.showPullResults(content, data.results);
+      // Play the slot-machine reel, then reveal the result card(s).
+      this.playGachaReveal(content, data.results, () => this.showPullResults(content, data.results));
       // Reflect new items immediately if the inventory panel is open.
       if (this.inventoryPanel) {
         const invContent = document.getElementById('inventory-content') as HTMLDivElement | null;
@@ -1670,6 +1671,73 @@ export class LobbyScene extends Phaser.Scene {
     } catch {
       await this.renderGachaContent(content);
     }
+  }
+
+  /**
+   * Slot-machine reveal: a strip of real item thumbnails scrolls fast under a
+   * center marker, decelerates (ease-out), and lands on the rarest item pulled,
+   * then flashes its rarity colour. Click to skip. Ceremony per gacha GDD §2.
+   */
+  private playGachaReveal(content: HTMLDivElement, results: Array<{ itemId: string; rarity: string }>, onDone: () => void): void {
+    const RANK = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'crazy'];
+    const headline = [...results].sort((a, b) => RANK.indexOf(b.rarity) - RANK.indexOf(a.rarity))[0];
+    if (!headline) { onDone(); return; }
+
+    content.innerHTML = '';
+    const pool = Object.keys(ITEMS);
+    const cellW = 84;            // per-cell pitch (cell 80 + gap 4)
+    const targetIndex = 28;      // where the won item sits in the reel
+    const totalCells = targetIndex + 6;
+
+    const vp = document.createElement('div');
+    vp.style.cssText = 'position:relative;width:100%;height:104px;overflow:hidden;border-radius:8px;background:#0d0d16;margin-bottom:14px;cursor:pointer;';
+    const strip = document.createElement('div');
+    strip.style.cssText = 'position:absolute;top:8px;left:0;display:flex;gap:4px;will-change:transform;';
+    for (let i = 0; i < totalCells; i++) {
+      let cellItem: string, cellRarity: string;
+      if (i === targetIndex) {
+        cellItem = headline.itemId; cellRarity = headline.rarity;
+      } else {
+        cellItem = pool[Math.floor(Math.random() * pool.length)];
+        cellRarity = ITEMS[cellItem]?.rarity ?? 'common';
+      }
+      const color = RARITY_COLORS[cellRarity] ?? '#888';
+      const cell = document.createElement('div');
+      cell.style.cssText = `width:${cellW - 4}px;height:88px;flex:0 0 auto;border:2px solid ${color};border-radius:6px;background:#12121e;display:flex;align-items:center;justify-content:center;`;
+      const cv = document.createElement('canvas');
+      cv.width = 60; cv.height = 60; cv.style.cssText = 'image-rendering:pixelated;';
+      void drawItemThumbnail(cv, cellItem, this.charKey);
+      cell.appendChild(cv);
+      strip.appendChild(cell);
+    }
+    const marker = document.createElement('div');
+    marker.style.cssText = 'position:absolute;left:50%;top:0;bottom:0;width:2px;background:#ffdd44;transform:translateX(-1px);z-index:2;box-shadow:0 0 8px #ffdd44;';
+    vp.append(strip, marker);
+    content.appendChild(vp);
+
+    const viewportW = vp.clientWidth || 372;
+    const finalX = viewportW / 2 - (targetIndex * cellW + (cellW - 4) / 2);
+    const dur = 2400;
+    const t0 = performance.now();
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3); // easeOutCubic — slot settling
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      strip.style.transform = `translateX(${finalX}px)`;
+      const color = RARITY_COLORS[headline.rarity] ?? '#888';
+      vp.style.boxShadow = `inset 0 0 0 3px ${color}, 0 0 24px ${color}`;
+      setTimeout(onDone, 600);
+    };
+    vp.onclick = finish; // click to skip
+    const stepFn = (now: number) => {
+      if (finished) return;
+      const t = Math.min(1, (now - t0) / dur);
+      strip.style.transform = `translateX(${finalX * ease(t)}px)`;
+      if (t < 1) requestAnimationFrame(stepFn);
+      else finish();
+    };
+    requestAnimationFrame(stepFn);
   }
 
   private showPullResults(content: HTMLDivElement, results: Array<{ itemId: string; rarity: string }>): void {
