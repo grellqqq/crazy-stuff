@@ -1122,6 +1122,9 @@ export class RaceRoom extends Room<RaceState> {
           playerName: s.playerName,
           tileX: s.tileX,
           tileY: s.tileY,
+          // Facing direction so remote avatars animate the way they move
+          // (was hardcoded to 'SD' client-side — everyone faced one way).
+          direction: this.lastDirection.get(s.sessionId) ?? 'SD',
           occupied: s.occupied,
           frozen: ps?.frozen ?? false,
           penalized: ps?.penalized ?? false,

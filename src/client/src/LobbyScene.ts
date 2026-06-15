@@ -431,6 +431,9 @@ export class LobbyScene extends Phaser.Scene {
     const token = this.authState?.session?.access_token;
     this.lobbyRoom = await client.joinOrCreate('lobby', { playerName, charKey: this.charKey, token });
     console.log(`[LobbyScene] connected to lobby room ${this.lobbyRoom.roomId}, sessionId=${this.lobbyRoom.sessionId}`);
+    // Re-assert our character on connect in case loadEquippedChar already
+    // resolved before the room finished connecting.
+    this.lobbyRoom.send('changeChar', { charKey: this.charKey });
 
     this.lobbyRoom.onMessage('lobbyState', (data: { players: { sessionId: string; playerName: string; x: number; y: number; facing: string; moving: boolean; charKey: string }[] }) => {
       const myId = this.lobbyRoom?.sessionId;
@@ -678,6 +681,11 @@ export class LobbyScene extends Phaser.Scene {
         this.charKey = charKey;
         // Update the player sprite to use the loaded character
         this.player.play(`${this.charKey}_idle_${this.playerFacing}`, true);
+        // Tell the lobby so other players see our real character, not the
+        // default 'male' we joined with (loadEquippedChar can resolve after
+        // connectLobby; connectLobby also re-sends on join to cover the
+        // opposite ordering).
+        if (this.lobbyRoom) this.lobbyRoom.send('changeChar', { charKey });
       }
     } catch { /* DB not available, use default */ }
   }
@@ -1335,6 +1343,9 @@ export class LobbyScene extends Phaser.Scene {
         headers: { 'Content-Type': 'application/json', ...this.authHeader() },
         body: JSON.stringify({ inventoryItemId: itemId, equipped: equip }),
       });
+      // Tell the lobby to re-fetch our loadout so other players see the change
+      // once lobby equipment-layer rendering lands (server already broadcasts it).
+      this.lobbyRoom?.send('refreshLoadout');
       // Re-fetch and re-render in place if we have the container
       if (contentContainer) {
         await this.renderInventoryContent(contentContainer);

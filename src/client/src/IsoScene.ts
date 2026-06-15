@@ -152,6 +152,8 @@ interface AvatarData {
   lastTileChange: number;
   /** Vertical offset for jump animation — applied on top of normal position. */
   jumpOffset: number;
+  /** Last facing direction from the server, for animating remote avatars. */
+  remoteFacing?: string;
 }
 
 // ─── Key-hold constants ──────────────────────────────────────────────────────
@@ -1156,6 +1158,7 @@ export class IsoScene extends Phaser.Scene {
         av.displayX = newX;
         av.displayY = newY;
       }
+      av.remoteFacing = slot.direction ?? av.remoteFacing ?? 'SD';
       av.playerName = slot.playerName ?? '';
 
       // Detect hole fall (frozen transition) for sound/particles
@@ -1460,8 +1463,10 @@ export class IsoScene extends Phaser.Scene {
     const config = this.slotConfigFor(av.slotIndex, isLocal);
     // Body follows the player's real character (av.charKey), NOT the slot index.
     const charDef = this.charDefFor(av, isLocal);
-    const dir = isLocal ? this.playerFacing : 'SD';
-    const mapping = charDef.dirMap[dir];
+    // Remote avatars now follow the server-broadcast facing instead of a
+    // hardcoded 'SD'; fall back to 'SD' until the first state with direction.
+    const dir = isLocal ? this.playerFacing : (av.remoteFacing ?? 'SD');
+    const mapping = charDef.dirMap[dir] ?? charDef.dirMap['SD'];
 
     // Moving = lerp in progress OR holding key OR recently sent input OR recently changed tile
     const isLerping = Math.abs(av.tileX - av.displayX) > 0.05 || Math.abs(av.tileY - av.displayY) > 0.05;
