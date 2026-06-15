@@ -107,6 +107,17 @@ export async function drawItemThumbnail(
   ctx.drawImage(work, 0, 0, BASE_FS, BASE_FS, 0, 0, canvas.width, canvas.height);
 }
 
+/** Warm the image cache for the body + every catalog item overlay, so reels
+ *  and inventory thumbnails draw instantly (no blank flash on first paint). */
+export function preloadThumbnails(charKey: string): void {
+  void loadImage(`/sprites/characters/${charKey}/idle_south-east.png`);
+  for (const def of Object.values(ITEMS)) {
+    if (def.slot === 'skin') continue;
+    const eqBody = equipmentBodyKey(def.id, charKey);
+    void loadImage(`/sprites/equipment/${def.slot}/${def.id}/${eqBody}/idle_south-east.png`);
+  }
+}
+
 /** Inventory row as returned by the (normalized) API / dev fixture. */
 export interface InvItem {
   id: string;

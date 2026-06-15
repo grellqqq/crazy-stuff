@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
 import { ITEMS, equipmentBodyKey } from '../../shared/items';
-import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META, drawItemThumbnail, RARITY_COLORS } from './itemDisplay';
+import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META, drawItemThumbnail, RARITY_COLORS, preloadThumbnails } from './itemDisplay';
+import { gachaTick, gachaReveal } from './gachaSfx';
 
 // East-side direction suffixes the body actually renders (west mirrors east
 // via flipX). Equipment overlays load the same five and mirror identically.
@@ -1571,6 +1572,8 @@ export class LobbyScene extends Phaser.Scene {
 
     document.body.appendChild(panel);
     this.gachaPanel = panel;
+    // Warm item thumbnails so the reveal reel never flashes blank cells.
+    preloadThumbnails(this.charKey);
     await this.renderGachaContent(content);
   }
 
@@ -1715,6 +1718,7 @@ export class LobbyScene extends Phaser.Scene {
     vp.append(strip, marker);
     content.appendChild(vp);
 
+    const rank = RANK.indexOf(headline.rarity);
     const viewportW = vp.clientWidth || 372;
     const finalX = viewportW / 2 - (targetIndex * cellW + (cellW - 4) / 2);
     const dur = 2400;
@@ -1726,18 +1730,69 @@ export class LobbyScene extends Phaser.Scene {
       finished = true;
       strip.style.transform = `translateX(${finalX}px)`;
       const color = RARITY_COLORS[headline.rarity] ?? '#888';
-      vp.style.boxShadow = `inset 0 0 0 3px ${color}, 0 0 24px ${color}`;
-      setTimeout(onDone, 600);
+      // Bigger flash + payoff the rarer the pull.
+      vp.style.boxShadow = `inset 0 0 0 ${2 + rank}px ${color}, 0 0 ${16 + rank * 10}px ${color}`;
+      gachaReveal(rank);
+      if (rank >= 2) this.spawnSparkles(vp, color, 10 + rank * 6);
+      if (rank >= 3 && this.gachaPanel) this.shakePanel(this.gachaPanel);
+      setTimeout(onDone, 700);
     };
     vp.onclick = finish; // click to skip
+    let lastCell = -1;
+    let lastTickAt = 0;
     const stepFn = (now: number) => {
       if (finished) return;
       const t = Math.min(1, (now - t0) / dur);
-      strip.style.transform = `translateX(${finalX * ease(t)}px)`;
+      const x = finalX * ease(t);
+      strip.style.transform = `translateX(${x}px)`;
+      // Tick as each cell crosses the marker; throttle so the fast start
+      // doesn't machine-gun, and ticks naturally slow as the reel settles.
+      const cell = Math.round((viewportW / 2 - x) / cellW);
+      if (cell !== lastCell && now - lastTickAt > 45) {
+        gachaTick();
+        lastCell = cell;
+        lastTickAt = now;
+      }
       if (t < 1) requestAnimationFrame(stepFn);
       else finish();
     };
     requestAnimationFrame(stepFn);
+  }
+
+  /** Burst of rarity-coloured sparkles flying out from the reveal centre. */
+  private spawnSparkles(container: HTMLElement, color: string, count: number): void {
+    const cx = container.clientWidth / 2;
+    const cy = container.clientHeight / 2;
+    for (let i = 0; i < count; i++) {
+      const size = 3 + Math.random() * 4;
+      const s = document.createElement('div');
+      s.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:${size}px;height:${size}px;`
+        + `border-radius:50%;background:${color};box-shadow:0 0 6px ${color};pointer-events:none;z-index:3;`
+        + 'transition:transform 0.6s ease-out, opacity 0.6s ease-out;';
+      container.appendChild(s);
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 40 + Math.random() * 80;
+      requestAnimationFrame(() => {
+        s.style.transform = `translate(${Math.cos(ang) * dist}px, ${Math.sin(ang) * dist}px) scale(0.3)`;
+        s.style.opacity = '0';
+      });
+      setTimeout(() => s.remove(), 700);
+    }
+  }
+
+  /** Brief shake of the gacha panel for epic+ reveals. */
+  private shakePanel(panel: HTMLElement): void {
+    if (!document.getElementById('gacha-shake-style')) {
+      const st = document.createElement('style');
+      st.id = 'gacha-shake-style';
+      // Keep the -50%,-50% centring offset while shaking.
+      st.textContent = '@keyframes gacha-shake{0%,100%{transform:translate(-50%,-50%)}'
+        + '20%{transform:translate(calc(-50% - 7px),-50%)}40%{transform:translate(calc(-50% + 7px),calc(-50% - 3px))}'
+        + '60%{transform:translate(calc(-50% - 5px),calc(-50% + 3px))}80%{transform:translate(calc(-50% + 4px),-50%)}}';
+      document.head.appendChild(st);
+    }
+    panel.style.animation = 'gacha-shake 0.4s';
+    setTimeout(() => { panel.style.animation = ''; }, 450);
   }
 
   private showPullResults(content: HTMLDivElement, results: Array<{ itemId: string; rarity: string }>): void {
