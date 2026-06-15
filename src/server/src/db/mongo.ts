@@ -36,6 +36,64 @@ export async function connectDB(): Promise<Db> {
 
 export function getDB(): Db { return db; }
 
+/**
+ * One-time inventory reset, run on server boot and gated by env:
+ *   INVENTORY_RESET_KEEP_EMAIL — the account to PRESERVE (keeps all its items).
+ *   INVENTORY_RESET_TOKEN      — optional run-key (defaults to the keep email).
+ *
+ * Resets every OTHER player to the 3-item starter kit. Records the run in a
+ * `migrations` doc so it never repeats for the same token (restarts are safe).
+ * Aborts without changes if the keep account can't be resolved, so it can
+ * never wipe everyone — including you — by accident. Remove the env var (or
+ * leave it; it won't re-run) once applied. Change the token to run again.
+ */
+export async function resetInventoriesOnBoot(): Promise<void> {
+  const keepEmail = process.env.INVENTORY_RESET_KEEP_EMAIL?.toLowerCase();
+  if (!keepEmail) return; // feature off
+  const token = process.env.INVENTORY_RESET_TOKEN ?? keepEmail;
+
+  const migrations = db.collection('migrations');
+  const prior = await migrations.findOne({ _id: 'inventory-reset' as never });
+  if (prior && prior.token === token) {
+    console.log('[reset] inventory reset already applied for this token — skipping');
+    return;
+  }
+
+  const user = await db.collection('users').findOne({ email: keepEmail });
+  if (!user) { console.error(`[reset] keep account ${keepEmail} not found — ABORTING (no changes)`); return; }
+  const keepPlayer = await db.collection('players').findOne({ userId: user._id.toString() });
+  if (!keepPlayer) { console.error(`[reset] no player for ${keepEmail} — ABORTING (no changes)`); return; }
+  const keepId = keepPlayer._id.toString();
+
+  const all = await db.collection('players').find({}).project({ _id: 1 }).toArray();
+  const resetObjIds = all.filter((p) => p._id.toString() !== keepId).map((p) => p._id);
+  const resetIds = resetObjIds.map((id) => id.toString());
+
+  const now = new Date();
+  const starterLoadout: Record<string, string> = {};
+  for (const id of STARTER_KIT) { const it = ITEMS[id]; starterLoadout[it.slot] = it.id; }
+
+  if (resetIds.length > 0) {
+    await db.collection('inventory').deleteMany({ playerId: { $in: resetIds } });
+    const rows = resetIds.flatMap((pid) => STARTER_KIT.map((id) => {
+      const it = ITEMS[id];
+      return { playerId: pid, itemType: it.slot, itemId: it.id, rarity: it.rarity, equipped: true, obtainedAt: now, source: 'starter' };
+    }));
+    if (rows.length > 0) await db.collection('inventory').insertMany(rows);
+    await db.collection('players').updateMany(
+      { _id: { $in: resetObjIds } },
+      { $set: { equippedLoadout: starterLoadout, updatedAt: now } },
+    );
+  }
+
+  await migrations.updateOne(
+    { _id: 'inventory-reset' as never },
+    { $set: { token, keepEmail, at: now, resetCount: resetIds.length } },
+    { upsert: true },
+  );
+  console.log(`[reset] reset ${resetIds.length} players to the starter kit; kept ${keepEmail}`);
+}
+
 /** Close the client and reset module state (tests / graceful shutdown). */
 export async function closeDB(): Promise<void> {
   await client?.close();

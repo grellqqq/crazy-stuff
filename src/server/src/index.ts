@@ -11,7 +11,7 @@ import { QueueRoom } from './rooms/QueueRoom';
 import { RaceRoom } from './rooms/RaceRoom';
 import { authRouter } from './auth/routes';
 import { requireOwnership } from './auth/middleware';
-import { connectDB } from './db/mongo';
+import { connectDB, resetInventoriesOnBoot } from './db/mongo';
 import {
   getOrCreatePlayer, getPlayer, getEquippedChar, equipChar,
   getInventory, equipItem, unequipItem,
@@ -191,7 +191,10 @@ gameServer.define('queue', QueueRoom);
 gameServer.define('race', RaceRoom);
 
 // Connect to MongoDB then start server (graceful fallback for local dev without DB)
-connectDB().then(() => {
+connectDB().then(async () => {
+  // One-time, env-gated inventory reset (no-op unless INVENTORY_RESET_KEEP_EMAIL
+  // is set; safe to leave configured — it won't repeat for the same token).
+  await resetInventoriesOnBoot().catch((e) => console.error('[reset] failed:', e));
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[server] Running on http://0.0.0.0:${PORT}`);
   });
