@@ -308,7 +308,7 @@ export class LobbyScene extends Phaser.Scene {
     this.playerLabel.setPosition(this.playerX, this.playerY - 55);
     this.localBubble?.setPosition(this.playerX, this.playerY - 70);
     // Keep our equipment layers glued to the body.
-    this.syncEquip(this.myEquip, this.playerX, this.playerY, this.playerFacing, moving, 10);
+    this.syncEquip(this.myEquip, this.playerX, this.playerY, this.playerFacing, moving, 10, this.player);
 
     // Send position to lobby room — always send on movement state change
     if (this.lobbyRoom) {
@@ -328,7 +328,7 @@ export class LobbyScene extends Phaser.Scene {
       other.sprite.y += (other.targetY - other.sprite.y) * 0.15;
       other.label.setPosition(other.sprite.x, other.sprite.y - 55);
       other.bubble?.setPosition(other.sprite.x, other.sprite.y - 70);
-      this.syncEquip(other.equip, other.sprite.x, other.sprite.y, other.facing, other.moving, 9);
+      this.syncEquip(other.equip, other.sprite.x, other.sprite.y, other.facing, other.moving, 9, other.sprite);
     }
 
     // E prompts (race building + gacha machine)
@@ -540,10 +540,13 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  /** Glue equipment layers to a body's position and play the matching anim. */
-  private syncEquip(target: Map<string, Phaser.GameObjects.Sprite>, x: number, y: number, dir: string, moving: boolean, baseDepth: number): void {
+  /** Glue equipment layers to a body's position and play the matching anim,
+   *  locking each layer's frame to the body sprite so clothes never drift.
+   *  `body` is the avatar's body sprite (local or remote) we sync frames to. */
+  private syncEquip(target: Map<string, Phaser.GameObjects.Sprite>, x: number, y: number, dir: string, moving: boolean, baseDepth: number, body: Phaser.GameObjects.Sprite): void {
     if (target.size === 0) return;
     const { suffix, flip } = this.equipDir(dir);
+    const bodyFrame = body.anims.currentFrame;
     let idx = 1;
     for (const [, s] of target) {
       s.setPosition(x, y);
@@ -551,7 +554,18 @@ export class LobbyScene extends Phaser.Scene {
       s.setDepth(baseDepth + 0.001 * idx);
       const eqKey = s.getData('eqKey');
       const animKey = `a_equip_${eqKey}_${moving ? 'walk' : 'idle'}_${suffix}`;
-      if (this.anims.exists(animKey) && s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
+      if (this.anims.exists(animKey)) {
+        s.setVisible(true);
+        if (s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
+        // Lock the layer to the body's current frame (0-based array position).
+        if (bodyFrame && s.anims.currentAnim) {
+          const frames = s.anims.currentAnim.frames;
+          const tgt = frames[Math.min(bodyFrame.index - 1, frames.length - 1)];
+          if (tgt && s.anims.currentFrame !== tgt) s.anims.setCurrentFrame(tgt);
+        }
+      } else {
+        s.setVisible(false);
+      }
       idx++;
     }
   }

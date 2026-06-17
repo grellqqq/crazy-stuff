@@ -1550,9 +1550,13 @@ export class IsoScene extends Phaser.Scene {
         equipAnimKey = `equip_${eqKey}_${dir}`;
       }
       if (!this.anims.exists(equipAnimKey)) {
-        equipSprite.setAlpha(0);
+        equipSprite.setVisible(false);
         continue;
       }
+      // Normalize visibility/alpha for EVERY avatar (local + remote). Previously
+      // only the local avatar got a per-frame correction in update(), which is
+      // why your own clothes looked fine while remote players flickered.
+      equipSprite.setVisible(true);
       equipSprite.setAlpha(1);
 
       // Sync equipment to body: same animation key and same frame index
@@ -1561,13 +1565,14 @@ export class IsoScene extends Phaser.Scene {
         equipSprite.play(equipAnimKey);
       }
 
-      // Lock equipment frame to body frame index (prevents drift/lag)
+      // Lock equipment frame to the body's current frame so they never drift.
+      // bodyFrame.index is 1-based; convert to a 0-based array position and
+      // compare frame *objects* (not mixed-base indices, which was the old bug).
       if (bodyFrame && equipSprite.anims.currentAnim) {
-        const bodyIdx = bodyFrame.index;  // 1-based in Phaser
         const equipFrames = equipSprite.anims.currentAnim.frames;
-        const clampedIdx = Math.min(bodyIdx, equipFrames.length) - 1;
-        if (clampedIdx >= 0 && equipSprite.anims.currentFrame?.index !== bodyIdx) {
-          equipSprite.anims.setCurrentFrame(equipFrames[clampedIdx]);
+        const target = equipFrames[Math.min(bodyFrame.index - 1, equipFrames.length - 1)];
+        if (target && equipSprite.anims.currentFrame !== target) {
+          equipSprite.anims.setCurrentFrame(target);
         }
       }
 
