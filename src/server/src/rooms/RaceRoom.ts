@@ -58,6 +58,8 @@ const CRUMBLE_DELAY_MS = 1500;
 const SLIDE_EXTRA_TILES = 1;
 const PUSH_STUN_MS = 200;
 const SHIELD_DURATION_MS = 4000;
+/** Hard cap — force-end a race after this long even if nobody finishes (M1-3). Tuning knob. */
+const MAX_RACE_TIME_MS = 180_000;
 /** Max seconds of stamina regen credited per move (caps the post-stun burst). */
 const STAMINA_REGEN_MAX_STEP = 0.5;
 
@@ -171,6 +173,7 @@ export class RaceRoom extends Room<RaceState> {
   private countdown = 0;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private startTime = 0;
+  private raceTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Finish tracking
   private finishOrder: FinishRecord[] = [];
@@ -383,6 +386,11 @@ export class RaceRoom extends Room<RaceState> {
     this.startTime = Date.now();
     this.finishOrder = [];
     this.finishCountdown = 0;
+    // Lock so matchmaking can't drop a new player into a race already in progress (M1-4).
+    this.lock();
+    // Hard time cap so a race can't sit in Racing forever if nobody finishes (M1-3).
+    if (this.raceTimeoutTimer) clearTimeout(this.raceTimeoutTimer);
+    this.raceTimeoutTimer = setTimeout(() => this.endRace(), MAX_RACE_TIME_MS);
     this.broadcastState();
   }
 
@@ -435,6 +443,7 @@ export class RaceRoom extends Room<RaceState> {
   private endRace(): void {
     if (this.phase === RacePhase.Finished) return;
     this.phase = RacePhase.Finished;
+    if (this.raceTimeoutTimer) { clearTimeout(this.raceTimeoutTimer); this.raceTimeoutTimer = null; }
 
     const results: RaceResult[] = [];
     const finishedIds = new Set(this.finishOrder.map(f => f.sessionId));
@@ -447,10 +456,12 @@ export class RaceRoom extends Room<RaceState> {
       if (ps) bonusPoints += ps.buttonsActivated * BONUS_BUTTON_ACTIVATED;
       if (f.timeSeconds < FAST_FINISH_THRESHOLD) bonusPoints += BONUS_FAST_FINISH;
       else if (f.timeSeconds < GOOD_FINISH_THRESHOLD) bonusPoints += BONUS_GOOD_FINISH;
+      const totalScore = positionPoints + bonusPoints;
       results.push({
         sessionId: f.sessionId, playerName: f.playerName,
         position: i + 1, timeSeconds: f.timeSeconds,
-        positionPoints, bonusPoints, totalScore: positionPoints + bonusPoints,
+        positionPoints, bonusPoints, totalScore,
+        xp: totalScore, coins: Math.floor(totalScore / 2),
       });
     }
 
@@ -459,10 +470,12 @@ export class RaceRoom extends Room<RaceState> {
       const ps = this.players.get(slot.sessionId);
       let bonusPoints = 0;
       if (ps) bonusPoints += ps.buttonsActivated * BONUS_BUTTON_ACTIVATED;
+      const totalScore = DNF_POINTS + bonusPoints;
       results.push({
         sessionId: slot.sessionId, playerName: slot.playerName,
         position: 0, timeSeconds: 0,
-        positionPoints: DNF_POINTS, bonusPoints, totalScore: DNF_POINTS + bonusPoints,
+        positionPoints: DNF_POINTS, bonusPoints, totalScore,
+        xp: totalScore, coins: Math.floor(totalScore / 2),
       });
     }
 
@@ -483,10 +496,8 @@ export class RaceRoom extends Room<RaceState> {
       if (!authId) return; // guest player, skip
       try {
         await getOrCreatePlayer(authId, r.playerName);
-        const xp = r.totalScore;
-        const coins = Math.floor(r.totalScore / 2);
-        await awardPostRace(authId, xp, coins, r.position === 1);
-        console.log(`[RaceRoom] awarded ${r.playerName}: ${xp}xp, ${coins}coins`);
+        await awardPostRace(authId, r.xp, r.coins, r.position === 1);
+        console.log(`[RaceRoom] awarded ${r.playerName}: ${r.xp}xp, ${r.coins}coins`);
       } catch (e) {
         console.error(`[RaceRoom] award failed for ${r.playerName}:`, e);
       }
@@ -557,6 +568,8 @@ export class RaceRoom extends Room<RaceState> {
     this.finishCountdown = 0;
     this.finishOrder = [];
     this.startTime = 0;
+    if (this.raceTimeoutTimer) { clearTimeout(this.raceTimeoutTimer); this.raceTimeoutTimer = null; }
+    this.unlock(); // room is joinable again (M1-4)
     this.rematchVotes.clear();
     if (this.rematchTimer) { clearTimeout(this.rematchTimer); this.rematchTimer = null; }
     this.broadcastState();

@@ -2287,7 +2287,7 @@ export class IsoScene extends Phaser.Scene {
       empty.innerHTML = `
         <div style="font-size: 28px; margin-bottom: 8px;">...</div>
         <div>No items yet</div>
-        <div style="font-size: 11px; margin-top: 6px; color: #444;">Win races and visit the store to earn items!</div>
+        <div style="font-size: 11px; margin-top: 6px; color: #444;">Win races to earn coins &amp; XP — and try the gacha for new items!</div>
       `;
       bagSection.appendChild(empty);
     } else {
@@ -2474,7 +2474,8 @@ export class IsoScene extends Phaser.Scene {
       const time = r.position > 0 ? `${r.timeSeconds.toFixed(2)}s` : '---';
       const bonus = r.bonusPoints > 0 ? ` (+${r.bonusPoints} bonus)` : '';
       const row = document.createElement('div');
-      row.textContent = `${pos}  ${r.playerName}  ${time}  ${r.totalScore}pts${bonus}`;
+      const reward = (r.xp || r.coins) ? `   +${r.xp} XP  +${r.coins} coins` : '';
+      row.textContent = `${pos}  ${r.playerName}  ${time}  ${r.totalScore}pts${bonus}${reward}`;
       row.style.cssText = 'font-size:14px; margin:4px 0; white-space:pre;';
       container.appendChild(row);
     }

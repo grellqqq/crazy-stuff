@@ -1501,7 +1501,7 @@ export class LobbyScene extends Phaser.Scene {
       empty.innerHTML = `
         <div style="font-size: 28px; margin-bottom: 8px;">...</div>
         <div>No items yet</div>
-        <div style="font-size: 11px; margin-top: 6px; color: #444;">Win races and visit the store to earn items!</div>
+        <div style="font-size: 11px; margin-top: 6px; color: #444;">Win races to earn coins &amp; XP — and try the gacha for new items!</div>
       `;
       bagSection.appendChild(empty);
     } else {

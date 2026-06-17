@@ -154,6 +154,8 @@ export interface RaceResult {
   positionPoints: number;
   bonusPoints: number;
   totalScore: number;
+  xp: number;
+  coins: number;
 }
 
 // ─── Procedural terrain generation ──────────────────────────────────────────
