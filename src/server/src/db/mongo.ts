@@ -21,6 +21,22 @@ export async function connectDB(): Promise<Db> {
   db = client.db('crazystuff');
   console.log('[MongoDB] connected');
 
+  // Detect replica-set / mongos support up front so transactional writes
+  // (provisioning, gacha) degrade gracefully on a standalone server instead of
+  // failing the first user's registration. `hello` needs no special privileges.
+  try {
+    const hello = await db.command({ hello: 1 });
+    txnSupported = !!(hello.setName || hello.msg === 'isdbgrid');
+    console.log(
+      `[MongoDB] multi-document transactions ${txnSupported
+        ? 'supported'
+        : 'UNAVAILABLE (standalone — run a replica set before launch!)'}`
+    );
+  } catch (e) {
+    txnSupported = false;
+    console.warn('[MongoDB] could not probe transaction support; assuming standalone', e);
+  }
+
   // Create indexes
   await db.collection('users').createIndex({ email: 1 }, { unique: true });
   await db.collection('users').createIndex({ username: 1 }, { unique: true });
@@ -135,7 +151,11 @@ export async function withTransaction<T>(
     return result;
   } catch (err: any) {
     const msg: string = err?.message ?? '';
-    if (err?.code === 20 || /Transaction numbers are only allowed|replica set/i.test(msg)) {
+    const isStandalone =
+      err?.code === 20 ||
+      err?.codeName === 'IllegalOperation' ||
+      /Transaction numbers are only allowed|replica set|not supported/i.test(msg);
+    if (isStandalone) {
       txnSupported = false;
       console.warn(
         '[MongoDB] multi-document transactions unsupported (standalone server?) — ' +
