@@ -1,7 +1,7 @@
 # Milestone: Phase 0 — Foundation
 
 **Target:** 2026-04-11
-**Status:** In Progress
+**Status:** ✅ Complete — superseded. This foundation milestone shipped and the project advanced far beyond it (full multiplayer, auth, inventory, gacha). Current plan: [`production/roadmap.md`](../roadmap.md).
 **Sprint:** Sprint 1
 
 ## Goal

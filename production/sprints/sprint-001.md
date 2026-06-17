@@ -1,7 +1,7 @@
 # Sprint 1 — Phase 0: Foundation
 
 **Dates:** 2026-03-22 → 2026-04-11
-**Status:** Active
+**Status:** ✅ Complete — superseded. Phase-0 foundation shipped; the project advanced far past this (full multiplayer, auth, inventory, gacha). See [`production/roadmap.md`](../roadmap.md) and [`sprint-002.md`](sprint-002.md) for current work.
 
 ## Sprint Goal
 

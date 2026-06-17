@@ -1,94 +1,112 @@
 # Systems Index — Crazy Stuff
 
-**Version:** 1.0
-**Created:** 2026-03-22
-**Total Systems:** 34
-**Designed:** 4 / 34
+**Version:** 2.0
+**Updated:** 2026-06-17 (rewritten to reflect built reality; v1.0 described a pre-multiplayer Phase 0 that was long surpassed)
+**Total Systems:** 36 in-game + 1 ops tool (admin dashboard)
+**Build status:** 17 Done · 8 Partial · 12 Not Started
 
-> This index is the authoritative decomposition of the game into individual systems.
-> Each system should have its own GDD at `design/gdd/[system-slug].md`.
-> The monolithic GDD at `design/gdd/crazy-stuff-gdd.md` remains the source of
-> vision, pillars, and cross-system context.
+> This index tracks **implementation status** of every system. The monolithic GDD
+> (`crazy-stuff-gdd.md`) holds vision/pillars; per-system GDDs hold detailed specs.
+> The forward plan (what's left, in what order, to public launch) lives in
+> [`production/roadmap.md`](../../production/roadmap.md).
+
+**Status legend:** ✅ Done · 🟡 Partial (built, missing pieces) · ⬜ Not Started
 
 ---
 
 ## Systems by Category
 
-### Foundation (Layer 0 — no dependencies)
+### Foundation (Layer 0)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 01 | Isometric Tile Renderer | 0 | Not Started | — |
-| 02 | Input System | 0 | Not Started | — |
-| 03 | Authentication / Account | 0 | Complete (reverse-doc) | [03-authentication.md](03-authentication.md) |
-| 04 | Database Persistence Layer | 0 | Not Started | — |
-| 05 | Redis Cache Layer | 4 | Not Started | — |
-| 06 | Asset Pipeline | 0 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 01 | Isometric Tile Renderer | ✅ Done | `IsoScene.ts` — iso grid, depth sort, terrain tiles |
+| 02 | Input System | ✅ Done | WASD + click; server-authoritative movement send |
+| 03 | Authentication / Account | ✅ Done | email+pw, Google OAuth (safe link), JWT, ownership middleware. GDD [03](03-authentication.md) |
+| 04 | Database Persistence | ✅ Done | **MongoDB** (ADR-004 superseded PostgreSQL); `db/mongo.ts` |
+| 05 | Redis Cache Layer | ⬜ Not Started | not wired; only needed for leaderboard/rate-limit scale |
+| 06 | Asset Pipeline | ✅ Done | PixelLab MCP + `tools/` scripts → sprite sheets |
 
-### Core (Layer 1 — depends on Foundation)
+### Core (Layer 1)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 07 | Player Movement | 0 | Not Started | — |
-| 08 | Item / Inventory | 2 | Complete (reverse-doc) | [08-item-inventory.md](08-item-inventory.md) |
-| 09 | Currency | 2 | Not Started | — |
-| 10 | Race Room (Colyseus) | 1 | Complete (reverse-doc) | [10-race-room.md](10-race-room.md) |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 07 | Player Movement | ✅ Done | 8-dir, server-authoritative, lobby + race |
+| 08 | Item / Inventory | ✅ Done | per-row inventory, slot conflicts, equip txn, loadout cache. GDD [08](08-item-inventory.md) |
+| 09 | Currency (Crazy Coins) | 🟡 Partial | earned + persisted; **no spend path** (no store) → M2 |
+| 10 | Race Room (Colyseus) | ✅ Done | authoritative `RaceRoom.ts`. GDD [10](10-race-room.md) |
 
 ### Gameplay — Lobby (Layer 2–3)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 11 | Avatar Renderer | 2 | Not Started | — |
-| 12 | Avatar / Customization | 2 | Not Started | — |
-| 13 | Lobby / Crazy Town | 3 | Not Started | — |
-| 14 | Ambient / NPC System | 3 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 11 | Avatar Renderer | ✅ Done | layered compositing, frame-locked, renders remote players. GDD [11](11-avatar-renderer.md) |
+| 12 | Avatar / Customization | 🟡 Partial | char select + equip work; **body still on legacy `equippedChar`**, not unified into inventory (skin-slot migration, [08](08-item-inventory.md) §3.3) |
+| 13 | Lobby / Crazy Town | 🟡 Partial | walkable hub works; **2 of 6 locations** (gacha + race queue). Missing: store, leaderboard wall, housing district. Placeholder gacha-machine art → M2 |
+| 14 | Ambient / NPC System | ⬜ Not Started | post-launch |
 
 ### Gameplay — Race (Layer 2–4)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 15 | Terrain System | 1 | Not Started | — |
-| 16 | Respawn System | 1 | Not Started | — |
-| 17 | Button / Trap System | 1 | Not Started | — |
-| 18 | Pickup System | 1 | Not Started | — |
-| 19 | Scoring System | 1 | Not Started | — |
-| 20 | Matchmaking / Queue | 1 | Not Started | — |
-| 21 | Race UI | 1 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 15 | Terrain System | ✅ Done | slow/slide/crumble/hole/wall (`shared/terrain.ts`) |
+| 16 | Respawn System | ✅ Done | fall → respawn in `RaceRoom` |
+| 17 | Button / Trap System | ✅ Done | 3 button types |
+| 18 | Pickup System | ✅ Done | 4 pickups |
+| 19 | Scoring System | ✅ Done | position + bonus → XP/coins |
+| 20 | Matchmaking / Queue | ✅ Done | `QueueRoom` ready-up + countdown (variant of GDD's wait-for-5/bots) |
+| 21 | Race UI | 🟡 Partial | HUD + results work; **results don't show XP/coins earned** → M1 |
 
 ### Progression (Layer 3–4)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 22 | XP / Level System | 2 | Not Started | — |
-| 23 | Seasonal Leaderboard | 2 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 22 | XP / Level System | ✅ Done | XP/level/coins persist via `awardPostRace`. Milestone-reward unlocks not built (post-launch) |
+| 23 | Seasonal Leaderboard | ⬜ Not Started | scores persist but no leaderboard/Wall → M2 |
 
 ### Economy (Layer 3–4)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 24 | Gacha System | 4 | Approved | [24-gacha-system.md](24-gacha-system.md) |
-| 25 | Store System | 4 | Not Started | — |
-| 26 | Payment Integration | 4 | Not Started | — |
-| 27 | Economy UI | 4 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 24 | Gacha System | 🟡 Partial | free pull **done** (crypto-RNG, pity, idempotent txn, reveal anim, only tested system); **paid gated `PAID_ENABLED=off`** pending payment + legal → M4. GDD [24](24-gacha-system.md) |
+| 25 | Store System | ⬜ Not Started | coin store → M2; paid store → M4 |
+| 26 | Payment Integration (Stripe) | ⬜ Not Started | M4 |
+| 27 | Economy UI | 🟡 Partial | gacha pull UI done; store/payment UI not → M4 |
 
 ### Social (Layer 3–4)
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 28 | Chat System | 3 | Not Started | — |
-| 29 | Voice Chat | 3 | Not Started | — |
-| 30 | Emote System | 3 | Not Started | — |
-| 31 | Friends / Social Graph | 3 | Not Started | — |
-| 32 | Lobby UI | 3 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 28 | Chat System | 🟡 Partial | lobby chat done; proximity/global scope + race chat TBD |
+| 29 | Voice Chat | ⬜ Not Started | post-launch |
+| 30 | Emote System | ⬜ Not Started | post-launch |
+| 31 | Friends / Social Graph | ⬜ Not Started | post-launch |
+| 32 | Lobby UI | 🟡 Partial | profile/inventory/gacha panels done; friends/customization-rich UI not |
 
-### Housing (Layer 3–5)
+### Housing (Layer 3–5) — all post-launch / V2
 
-| # | System | Phase | Status | GDD |
-|---|---|---|---|---|
-| 33 | Housing System | 4 | Not Started | — |
-| 34 | Furniture / Decoration | 4 | Not Started | — |
-| 35 | Guestbook | 4 | Not Started | — |
-| 36 | Housing UI | 4 | Not Started | — |
+| # | System | Status | Notes |
+|---|---|---|---|
+| 33 | Housing System | ⬜ Not Started | V2 (Gabriel wants to detail — open topic) |
+| 34 | Furniture / Decoration | ⬜ Not Started | V2 |
+| 35 | Guestbook | ⬜ Not Started | V2 |
+| 36 | Housing UI | ⬜ Not Started | V2 |
+
+### Ops (not in original index)
+
+| # | System | Status | Notes |
+|---|---|---|---|
+| A1 | Admin Dashboard | ✅ Done | **separate repo `crazy-stuff-admin`** (Next.js, direct Mongo, ADMIN_PASSWORD). Player/account/item management |
+
+---
+
+## Build Status Summary
+
+- **✅ Done (17):** 01, 02, 03, 04, 06, 07, 08, 10, 11, 15, 16, 17, 18, 19, 20, 22, A1
+- **🟡 Partial (8):** 09, 12, 13, 21, 24, 27, 28, 32
+- **⬜ Not Started (12):** 05, 14, 23, 25, 26, 29, 30, 31, 33, 34, 35, 36
+
+The **core loop is complete end-to-end**: login → lobby → queue → race → rewards → progression. Remaining work is breadth (content, economy spend-paths, social/housing) and launch-hardening (replica set, abuse/GDPR), not core risk. See [`production/roadmap.md`](../../production/roadmap.md).
 
 ---
 
@@ -96,123 +114,40 @@
 
 ```
 LAYER 0 — Foundation
-  Isometric Tile Renderer     (none)
-  Input System                (none)
-  Authentication / Account    (none)
-  Database Persistence Layer  (none)
-  Redis Cache Layer           (none)
-  Asset Pipeline              (none)
-
+  Isometric Tile Renderer ✅   Input ✅   Auth ✅   Database ✅   Redis ⬜   Asset Pipeline ✅
 LAYER 1 — Core
-  Player Movement       → Tile Renderer, Input
-  Item / Inventory      → Database
-  Currency              → Database
-  Race Room (Colyseus)  → Auth, Database
-
+  Player Movement ✅ → Tile Renderer, Input
+  Item / Inventory ✅ → Database
+  Currency 🟡 → Database          (blocked-feature: needs Store to matter)
+  Race Room ✅ → Auth, Database
 LAYER 2 — Gameplay Core
-  Avatar Renderer       → Tile Renderer, Item/Inventory
-  Terrain System        → Tile Renderer, Race Room
-  Matchmaking / Queue   → Auth, Race Room
-  XP / Level System     → Database (schema only; Scoring grants XP at match-end)
-  Friends/Social Graph  → Auth, Database
-
+  Avatar Renderer ✅ → Tile Renderer, Item/Inventory
+  Terrain ✅ → Tile Renderer, Race Room
+  Matchmaking/Queue ✅ → Auth, Race Room
+  XP/Level ✅ → Database
 LAYER 3 — Gameplay Features
-  Avatar / Customization  → Item/Inventory, Avatar Renderer
-  Lobby / Crazy Town      → Tile Renderer, Player Movement, Auth, Avatar Renderer
-  Respawn System          → Terrain, Race Room
-  Button / Trap System    → Terrain, Race Room
-  Pickup System           → Race Room, Item/Inventory
-  Scoring System          → Race Room
-  Gacha System            → Item/Inventory, Database, Payment (soft — paid pulls only; Currency uninvolved at launch, see GDD §3.3)
-  Store System            → Item/Inventory, Currency, Database
-  Chat System             → Auth, Lobby/Crazy Town
-  Emote System            → Avatar Renderer, Lobby/Crazy Town
-  Housing System          → Auth, Tile Renderer, Database
-
-LAYER 4 — Dependent Features
-  Race UI                 → Scoring, Race Room, XP/Level, Currency
-  Seasonal Leaderboard    → Scoring, Database, Redis
-  Payment Integration     → Auth, Currency
-  Ambient / NPC System    → Lobby/Crazy Town, Tile Renderer
-  Voice Chat              → Race Room
-  Furniture/Decoration    → Housing, Item/Inventory
-  Lobby UI                → Avatar/Customization, Friends/Social Graph
-  Economy UI              → Gacha, Store, Currency, Payment
-
-LAYER 5 — Polish
-  Guestbook               → Housing, Friends/Social Graph
-  Housing UI              → Housing, Furniture/Decoration
+  Avatar/Customization 🟡 → Item/Inventory, Avatar Renderer
+  Lobby/Crazy Town 🟡 → Tile Renderer, Movement, Auth, Avatar Renderer
+  Respawn ✅ / Button ✅ / Pickup ✅ / Scoring ✅ → Terrain, Race Room
+  Gacha 🟡 → Item/Inventory, Database, Payment(soft, paid only)
+  Store ⬜ → Item/Inventory, Currency, Database
+  Chat 🟡 → Auth, Lobby
+LAYER 4 — Dependent
+  Race UI 🟡 → Scoring, Race Room, XP/Level, Currency
+  Seasonal Leaderboard ⬜ → Scoring, Database, (Redis)
+  Payment ⬜ → Auth, Currency
+  Economy UI 🟡 → Gacha, Store, Currency, Payment
+LAYER 5 — Polish / V2
+  Housing ⬜ / Furniture ⬜ / Guestbook ⬜ / Housing UI ⬜ / Voice ⬜ / Emote ⬜ / Friends ⬜ / Ambient ⬜
 ```
 
----
+## High-Risk Bottlenecks — all RESOLVED (built + working)
 
-## High-Risk Bottlenecks
+| System | Dependents | Original risk | Status |
+|---|---|---|---|
+| Isometric Tile Renderer | 8 | tile size / depth sort | ✅ shipped, stable |
+| Authentication | 7 | session model | ✅ shipped; security gap (§3.7) closed |
+| Race Room | 7 | authoritative schema | ✅ shipped |
+| Item / Inventory | 6 | slot schema | ✅ shipped |
 
-These systems have the most dependents — mistakes here cascade widely:
-
-| System | Dependents | Risk |
-|---|---|---|
-| Isometric Tile Renderer | 8 systems | CRITICAL — validate tile size (32×16px) in prototype before locking |
-| Authentication / Account | 7 systems | CRITICAL — session model affects all persistence |
-| Race Room (Colyseus) | 7 systems | CRITICAL — authoritative state schema drives all race systems |
-| Item / Inventory | 6 systems | HIGH — schema must handle all 12 avatar slots + furniture + pickups |
-
----
-
-## Recommended Design Order
-
-Design GDDs in this order (dependency-safe + phase-priority ordered).
-Note: the monolithic GDD covers most systems at a high level — per-system GDDs
-add formulas, edge cases, and acceptance criteria needed before implementation.
-
-```
- 1. Isometric Tile Renderer      Phase 0  ← Foundation, most-depended-on
- 2. Race Room (Colyseus)         Phase 1  ← Foundation, defines server state schema
- 3. Item / Inventory             Phase 2  ← Core bottleneck for 6 systems
- 4. Authentication / Account     Phase 0  ← Core bottleneck for 7 systems
- 5. Player Movement              Phase 0
- 6. Terrain System               Phase 1
- 7. Respawn System               Phase 1
- 8. Button / Trap System         Phase 1
- 9. Pickup System                Phase 1
-10. Scoring System               Phase 1
-11. Matchmaking / Queue          Phase 1
-12. Race UI                      Phase 1
-13. Currency                     Phase 2
-14. XP / Level System            Phase 2
-15. Avatar Renderer              Phase 2
-16. Avatar / Customization       Phase 2
-17. Seasonal Leaderboard         Phase 2
-18. Lobby / Crazy Town           Phase 3
-19. Chat System                  Phase 3
-20. Friends / Social Graph       Phase 3
-21. Emote System                 Phase 3
-22. Voice Chat                   Phase 3
-23. Ambient / NPC System         Phase 3
-24. Lobby UI                     Phase 3
-25. Gacha System                 Phase 4
-26. Store System                 Phase 4
-27. Payment Integration          Phase 4
-28. Economy UI                   Phase 4
-29. Housing System               Phase 4
-30. Furniture / Decoration       Phase 4
-31. Guestbook                    Phase 4
-32. Housing UI                   Phase 4
-33. Redis Cache Layer            Phase 4
-34. Database Persistence Layer   Phase 0 (scaffolded early, grows throughout)
-```
-
----
-
-## Progress Tracker
-
-**Phase 0:** 1/6 systems designed
-**Phase 1:** 1/7 systems designed
-**Phase 2:** 1/7 systems designed
-**Phase 3:** 0/6 systems designed
-**Phase 4:** 1/8 systems designed
-
-**Overall:** 4/34 systems designed
-
-*Update this tracker as system GDDs are completed. Mark Status as "In Progress",
-"Complete", or "Deferred" and add the GDD path.*
+The big technical risks are behind us — this is why the project is past prototype.
