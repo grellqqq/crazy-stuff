@@ -69,10 +69,6 @@ Key patterns in `RaceRoom`:
 
 @.claude/docs/directory-structure.md
 
-## Engine Version Reference
-
-@docs/engine-reference/godot/VERSION.md
-
 ## Technical Preferences
 
 @.claude/docs/technical-preferences.md

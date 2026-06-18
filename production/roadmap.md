@@ -17,6 +17,8 @@ The full core loop works end-to-end and is deployed (Dokploy): **login → walka
 
 What's missing is **breadth** (content depth, spend-paths, social/housing) and **launch-hardening** (replica set, abuse protection, GDPR), plus the **monetization** turn-on (gated by a legal review). None of the remaining core-loop work carries the technical risk that's already been retired.
 
+**Known risk — test coverage:** only the gacha system has tests (`tests/unit/gacha.test.ts`, `tests/integration/gacha.int.test.ts`). The rest of the loop (auth, race, inventory, equip) is unverified by automated tests — worth closing before/around launch (folds into M3-6 ops basics).
+
 ---
 
 ## Milestone 1 — Loop Polish & Robustness  *(pure code — START NOW, no PixelLab)*
