@@ -1,5 +1,6 @@
 import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb';
 import { ITEMS } from '../../../shared/items';
+import { currentSeasonId } from '../../../shared/season';
 import {
   buildPool, pullBatch, computeOdds, cryptoRng, GACHA_CONFIG, RARITIES,
   freeAvailable, nextMidnightUTC,
@@ -46,6 +47,8 @@ export async function connectDB(): Promise<Db> {
   // Gacha: pullId is the idempotency key (one pull request → one outcome).
   await db.collection('pulls').createIndex({ pullId: 1 }, { unique: true });
   await db.collection('pulls').createIndex({ userId: 1, createdAt: -1 });
+  // Seasonal leaderboard (#23): rank by season XP within the current season.
+  await db.collection('players').createIndex({ seasonId: 1, seasonXp: -1 });
 
   return db;
 }
@@ -293,6 +296,10 @@ export async function getOrCreatePlayer(userId: string, username: string) {
       coins: 0,
       totalRaces: 0,
       totalWins: 0,
+      // Seasonal leaderboard (#23): points within the current UTC-month season.
+      seasonId: currentSeasonId(now),
+      seasonXp: 0,
+      seasonWins: 0,
       equippedChar: 'male',
       equippedLoadout: {},
       // Gacha state (gacha GDD §3.3).
@@ -327,17 +334,82 @@ export async function awardPostRace(userId: string, xp: number, coins: number, w
     const newXp = player.xp + xp;
     const newLevel = Math.floor(newXp / 500) + 1;
 
+    // Seasonal points (#23): accumulate within the current season; reset to this
+    // race's contribution on the first race of a new season (rollover).
+    const season = currentSeasonId();
+    const sameSeason = player.seasonId === season;
+    const newSeasonXp = (sameSeason ? (player.seasonXp ?? 0) : 0) + xp;
+    const newSeasonWins = (sameSeason ? (player.seasonWins ?? 0) : 0) + (won ? 1 : 0);
+
     await players.updateOne(
       { userId },
       {
         $inc: { totalRaces: 1, totalWins: won ? 1 : 0 },
-        $set: { xp: newXp, coins: player.coins + coins, level: newLevel, updatedAt: new Date() },
+        $set: {
+          xp: newXp, coins: player.coins + coins, level: newLevel,
+          seasonId: season, seasonXp: newSeasonXp, seasonWins: newSeasonWins,
+          updatedAt: new Date(),
+        },
       },
       { session }
     );
 
     return players.findOne({ userId }, { session });
   });
+}
+
+/**
+ * Top players for the current season, ranked by season XP (then season wins,
+ * then username — see `compareLeaderboard`). Only players who scored this
+ * season appear. Public, read-only; powers the lobby Leaderboard Wall (#23).
+ */
+export async function getLeaderboard(limit = 25) {
+  const season = currentSeasonId();
+  const rows = await db.collection('players')
+    .find({ seasonId: season, seasonXp: { $gt: 0 } })
+    .sort({ seasonXp: -1, seasonWins: -1, username: 1 })
+    .limit(limit)
+    .project({ _id: 0, userId: 1, username: 1, seasonXp: 1, seasonWins: 1, level: 1 })
+    .toArray();
+  return {
+    seasonId: season,
+    entries: rows.map((r, i) => ({ rank: i + 1, ...r })),
+  };
+}
+
+/**
+ * A single player's standing this season — their rank even when outside the
+ * top N (so the wall can show "you're #142"). `rank` is null when the player
+ * hasn't scored this season yet. The rank uses the SAME total order as
+ * `getLeaderboard` (season XP, then wins, then username), so a player's footer
+ * rank always matches their row position on the board.
+ */
+export async function getPlayerSeasonRank(userId: string) {
+  const season = currentSeasonId();
+  const players = db.collection('players');
+  const me = await players.findOne(
+    { userId },
+    { projection: { _id: 0, username: 1, seasonId: 1, seasonXp: 1, seasonWins: 1 } },
+  );
+  const inSeason = !!me && me.seasonId === season;
+  const myXp = inSeason ? (me!.seasonXp ?? 0) : 0;
+  const myWins = inSeason ? (me!.seasonWins ?? 0) : 0;
+  const myName = (me?.username as string) ?? '';
+  const totalRanked = await players.countDocuments({ seasonId: season, seasonXp: { $gt: 0 } });
+
+  if (myXp <= 0) {
+    return { seasonId: season, rank: null, seasonXp: 0, seasonWins: 0, totalRanked };
+  }
+  // Count players strictly ahead in the board's order (XP, then wins, then name).
+  const ahead = await players.countDocuments({
+    seasonId: season,
+    $or: [
+      { seasonXp: { $gt: myXp } },
+      { seasonXp: myXp, seasonWins: { $gt: myWins } },
+      { seasonXp: myXp, seasonWins: myWins, username: { $lt: myName } },
+    ],
+  });
+  return { seasonId: season, rank: ahead + 1, seasonXp: myXp, seasonWins: myWins, totalRanked };
 }
 
 export async function getEquippedChar(userId: string): Promise<string> {

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { type AuthState } from './auth';
 import { ITEMS, equipmentBodyKey } from '../../shared/items';
+import { seasonLabel } from '../../shared/season';
 import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META, drawItemThumbnail, RARITY_COLORS, preloadThumbnails } from './itemDisplay';
 import { gachaTick, gachaReveal } from './gachaSfx';
 
@@ -68,6 +69,11 @@ export class LobbyScene extends Phaser.Scene {
   private gachaY = 0;
   private gachaPrompt!: Phaser.GameObjects.Text;
   private gachaPanel: HTMLDivElement | null = null;
+
+  private boardX = 0;
+  private boardY = 0;
+  private boardPrompt!: Phaser.GameObjects.Text;
+  private leaderboardPanel: HTMLDivElement | null = null;
 
   private groundBounds = { left: 0, right: 0, top: 0, bottom: 0 };
   private charKey = DEFAULT_CHAR_KEY;
@@ -155,6 +161,11 @@ export class LobbyScene extends Phaser.Scene {
     this.gachaY = cy;
     this.drawGachaMachine(this.gachaX, this.gachaY);
 
+    // Leaderboard wall at top-center
+    this.boardX = width / 2;
+    this.boardY = 120;
+    this.drawLeaderboardWall(this.boardX, this.boardY);
+
     // Register animations
     this.registerAnimations();
 
@@ -218,6 +229,24 @@ export class LobbyScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
+    // Leaderboard wall interact prompt
+    this.boardPrompt = this.add.text(this.boardX, this.boardY - 64, '[E] Leaderboard', {
+      fontSize: '16px',
+      fontFamily: 'monospace',
+      color: '#ffdd44',
+      backgroundColor: '#000000aa',
+      padding: { x: 8, y: 4 },
+    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+
+    this.tweens.add({
+      targets: this.boardPrompt,
+      scaleY: 1.08,
+      duration: 500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
     // Input
     const kb = this.input.keyboard!;
     this.keys = {
@@ -231,6 +260,8 @@ export class LobbyScene extends Phaser.Scene {
       // Gacha machine takes priority when in range (it's the nearer object on its side).
       const dGacha = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.gachaX, this.gachaY);
       if (dGacha <= INTERACT_DIST) { this.toggleGacha(); return; }
+      const dBoard = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.boardX, this.boardY);
+      if (dBoard <= INTERACT_DIST) { this.toggleLeaderboard(); return; }
       const dRace = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
       if (dRace <= INTERACT_DIST) this.enterRace();
     });
@@ -336,6 +367,8 @@ export class LobbyScene extends Phaser.Scene {
     this.ePrompt.setAlpha(dist <= INTERACT_DIST ? 1 : 0);
     const dGacha = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.gachaX, this.gachaY);
     this.gachaPrompt.setAlpha(dGacha <= INTERACT_DIST ? 1 : 0);
+    const dBoard = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.boardX, this.boardY);
+    this.boardPrompt.setAlpha(dBoard <= INTERACT_DIST ? 1 : 0);
   }
 
   private resolveDir(w: boolean, a: boolean, s: boolean, d: boolean): string {
@@ -423,6 +456,150 @@ export class LobbyScene extends Phaser.Scene {
     this.add.text(gx, gy + 14, 'GACHA', {
       fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
     }).setOrigin(0.5, 0.5).setDepth(6);
+  }
+
+  /** Draw a standing notice board for the seasonal leaderboard (#23).
+   *  Placeholder art until real pixel-art lands. */
+  private drawLeaderboardWall(bx: number, by: number): void {
+    const g = this.add.graphics().setDepth(5);
+
+    // Ground shadow
+    g.fillStyle(0x000000, 0.3);
+    g.fillEllipse(bx, by + 56, 112, 18);
+
+    // Wooden posts
+    g.fillStyle(0x5a3d22, 1);
+    g.fillRect(bx - 56, by - 36, 8, 92);
+    g.fillRect(bx + 48, by - 36, 8, 92);
+
+    // Board panel + gold frame
+    g.fillStyle(0x2a2438, 1);
+    g.fillRoundedRect(bx - 60, by - 48, 120, 74, 8);
+    g.lineStyle(3, 0xffdd44, 1);
+    g.strokeRoundedRect(bx - 60, by - 48, 120, 74, 8);
+
+    // Header bar
+    g.fillStyle(0xffdd44, 1);
+    g.fillRoundedRect(bx - 60, by - 48, 120, 20, 8);
+
+    // Trophy
+    g.fillStyle(0xffcc33, 1);
+    g.fillRoundedRect(bx - 8, by - 14, 16, 13, 3);
+    g.fillRect(bx - 3, by - 1, 6, 7);
+    g.fillRect(bx - 10, by + 6, 20, 4);
+
+    // Ranking bars (decorative)
+    g.fillStyle(0xcccccc, 0.45);
+    g.fillRect(bx - 46, by - 14, 26, 4);
+    g.fillRect(bx - 46, by - 5, 20, 4);
+    g.fillRect(bx + 22, by - 14, 24, 4);
+    g.fillRect(bx + 22, by - 5, 16, 4);
+
+    this.add.text(bx, by - 38, 'LEADERBOARD', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#1a1a2e', fontStyle: 'bold',
+    }).setOrigin(0.5, 0.5).setDepth(6);
+  }
+
+  // ─── Leaderboard (#23; walk-up board, top players by season XP) ─────────────
+
+  private toggleLeaderboard(): void {
+    if (this.leaderboardPanel) { this.leaderboardPanel.remove(); this.leaderboardPanel = null; return; }
+    this.openLeaderboard();
+  }
+
+  private openLeaderboard(): void {
+    if (this.leaderboardPanel) { this.leaderboardPanel.remove(); this.leaderboardPanel = null; }
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #1a1a2e; border: 2px solid #ffdd44; border-radius: 8px;
+      padding: 24px; width: 420px; max-height: 80vh; overflow-y: auto;
+      z-index: 9000; font-family: monospace; color: #eee;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    `;
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('keyup', (e) => e.stopPropagation());
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'X';
+    closeBtn.style.cssText = `
+      position: absolute; top: 8px; right: 12px; background: none; border: none;
+      color: #888; font-size: 18px; cursor: pointer; font-family: monospace; font-weight: bold;
+    `;
+    closeBtn.onclick = () => { this.leaderboardPanel?.remove(); this.leaderboardPanel = null; };
+    panel.appendChild(closeBtn);
+
+    const title = document.createElement('h2');
+    title.textContent = '\u{1F3C6} LEADERBOARD';
+    title.style.cssText = 'margin: 0 0 4px; text-align: center; color: #ffdd44; font-size: 18px;';
+    panel.appendChild(title);
+
+    const content = document.createElement('div');
+    content.id = 'leaderboard-content';
+    panel.appendChild(content);
+
+    document.body.appendChild(panel);
+    this.leaderboardPanel = panel;
+    void this.renderLeaderboardContent(content);
+  }
+
+  private async renderLeaderboardContent(content: HTMLDivElement): Promise<void> {
+    content.innerHTML = '<p style="text-align:center;color:#888">Loading…</p>';
+    const authId = this.authState?.session?.user?.id;
+    const esc = (s: string) => s.replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    const medal = (r: number) => r === 1 ? '\u{1F947}' : r === 2 ? '\u{1F948}' : r === 3 ? '\u{1F949}' : `#${r}`;
+    try {
+      const reqs: Promise<Response>[] = [fetch(`${this.apiBase()}/api/leaderboard?limit=25`)];
+      if (authId) reqs.push(fetch(`${this.apiBase()}/api/player/${authId}/rank`, { headers: this.authHeader() }));
+      const [boardRes, rankRes] = await Promise.all(reqs);
+      const board = await boardRes.json();
+      const myRank = rankRes ? await rankRes.json() : null;
+      content.innerHTML = '';
+
+      // Season header
+      const season = document.createElement('div');
+      season.style.cssText = 'text-align:center;color:#aaa;font-size:12px;margin-bottom:14px;';
+      season.textContent = `Season ${seasonLabel(board.seasonId)}`;
+      content.appendChild(season);
+
+      if (!board.entries.length) {
+        const empty = document.createElement('p');
+        empty.style.cssText = 'text-align:center;color:#888;line-height:1.5;';
+        empty.textContent = 'No racers ranked yet this season — be the first! Win races to climb the board.';
+        content.appendChild(empty);
+      } else {
+        const list = document.createElement('div');
+        list.innerHTML = board.entries.map((e: any) => {
+          const me = !!authId && e.userId === authId;
+          return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;margin-bottom:4px;${me ? 'background:#2a2a4e;border:1px solid #ffdd44;' : ''}">
+            <span style="width:34px;text-align:center;font-weight:bold;color:#ffdd44;">${medal(e.rank)}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.username)} <span style="color:#666;font-size:11px;">Lv${e.level}</span></span>
+            <span style="color:#9cc99c;font-size:12px;width:42px;text-align:right;">${e.seasonWins}W</span>
+            <span style="color:#ffe;width:78px;text-align:right;">${e.seasonXp} XP</span>
+          </div>`;
+        }).join('');
+        content.appendChild(list);
+      }
+
+      // The viewer's own standing (esp. when outside the top N).
+      if (myRank) {
+        const inTop = !!authId && board.entries.some((e: any) => e.userId === authId);
+        const foot = document.createElement('div');
+        foot.style.cssText = 'margin-top:14px;border-top:1px solid #333;padding-top:10px;text-align:center;font-size:12px;color:#ccc;';
+        if (myRank.rank === null) {
+          foot.textContent = "You haven't scored this season yet — race to get on the board!";
+        } else if (inTop) {
+          foot.textContent = `You're #${myRank.rank} of ${myRank.totalRanked} this season \u{1F389}`;
+        } else {
+          foot.textContent = `Your rank: #${myRank.rank} of ${myRank.totalRanked} · ${myRank.seasonXp} XP`;
+        }
+        content.appendChild(foot);
+      }
+    } catch (e) {
+      console.error('[Leaderboard] load failed:', e);
+      content.innerHTML = '<p style="text-align:center;color:#c66">Couldn’t load the leaderboard. Try again.</p>';
+    }
   }
 
   private registerAnimations(): void {
@@ -828,6 +1005,7 @@ export class LobbyScene extends Phaser.Scene {
     this.inventoryBtn = null;
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
     if (this.gachaPanel) { this.gachaPanel.remove(); this.gachaPanel = null; }
+    if (this.leaderboardPanel) { this.leaderboardPanel.remove(); this.leaderboardPanel = null; }
     if (this.chatBox) { this.chatBox.remove(); this.chatBox = null; }
     this.destroyQueueUI();
     if (this.queueRoom) { this.queueRoom.leave(); this.queueRoom = null; }

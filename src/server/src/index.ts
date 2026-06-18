@@ -17,6 +17,7 @@ import {
   getOrCreatePlayer, getPlayer, getEquippedChar, equipChar,
   getInventory, equipItem, unequipItem,
   getGachaOdds, getGachaStatus, executePull, devGrantCredits, GachaError,
+  getLeaderboard, getPlayerSeasonRank,
 } from './db/mongo';
 
 const app = express();
@@ -71,9 +72,32 @@ function sendGachaError(res: express.Response, e: unknown): void {
   }
 }
 
+// Public seasonal leaderboard (#23) — top players by season XP. No auth: it's
+// a public board (like gacha odds). `limit` is clamped to [1, 100].
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.floor(raw))) : 25;
+    res.json(await getLeaderboard(limit));
+  } catch (e) {
+    console.error('[API] leaderboard error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+});
+
 // All /api/player/:userId/* routes require a valid JWT whose subject matches :userId.
 // See design/gdd/03-authentication.md §3.7 for the contract.
 app.use('/api/player/:userId', requireOwnership);
+
+// The requesting player's own season standing (rank even when outside the top N).
+app.get('/api/player/:userId/rank', async (req, res) => {
+  try {
+    res.json(await getPlayerSeasonRank(req.params.userId));
+  } catch (e) {
+    console.error('[API] rank error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+});
 
 // Player profile API
 app.get('/api/player/:userId', async (req, res) => {

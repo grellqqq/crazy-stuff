@@ -3,7 +3,7 @@
 **Version:** 2.0
 **Updated:** 2026-06-17 (rewritten to reflect built reality; v1.0 described a pre-multiplayer Phase 0 that was long surpassed)
 **Total Systems:** 36 in-game + 1 ops tool (admin dashboard)
-**Build status:** 17 Done · 8 Partial · 12 Not Started
+**Build status:** 18 Done · 8 Partial · 11 Not Started
 
 > This index tracks **implementation status** of every system. The monolithic GDD
 > (`crazy-stuff-gdd.md`) holds vision/pillars; per-system GDDs hold detailed specs.
@@ -62,7 +62,7 @@
 | # | System | Status | Notes |
 |---|---|---|---|
 | 22 | XP / Level System | ✅ Done | XP/level/coins persist via `awardPostRace`. Milestone-reward unlocks not built (post-launch) |
-| 23 | Seasonal Leaderboard | ⬜ Not Started | scores persist but no leaderboard/Wall → M2 |
+| 23 | Seasonal Leaderboard | ✅ Done | season-XP board + lobby Leaderboard Wall ([E]) + your-rank API; monthly UTC seasons w/ rollover; unit + integration tested. Placeholder wall art; live visual QA pending |
 
 ### Economy (Layer 3–4)
 
@@ -102,9 +102,9 @@
 
 ## Build Status Summary
 
-- **✅ Done (17):** 01, 02, 03, 04, 06, 07, 08, 10, 11, 15, 16, 17, 18, 19, 20, 22, A1
+- **✅ Done (18):** 01, 02, 03, 04, 06, 07, 08, 10, 11, 15, 16, 17, 18, 19, 20, 22, 23, A1
 - **🟡 Partial (8):** 09, 12, 13, 21, 24, 27, 28, 32
-- **⬜ Not Started (12):** 05, 14, 23, 25, 26, 29, 30, 31, 33, 34, 35, 36
+- **⬜ Not Started (11):** 05, 14, 25, 26, 29, 30, 31, 33, 34, 35, 36
 
 The **core loop is complete end-to-end**: login → lobby → queue → race → rewards → progression. Remaining work is breadth (content, economy spend-paths, social/housing) and launch-hardening (replica set, abuse/GDPR), not core risk. See [`production/roadmap.md`](../../production/roadmap.md).
 
