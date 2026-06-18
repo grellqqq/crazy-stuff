@@ -22,8 +22,13 @@ interface LobbyPlayer {
 
 const ALLOWED_CHARS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 
+/** Chat anti-spam: at most CHAT_MAX messages per CHAT_WINDOW_MS per client (M3-2). */
+const CHAT_MAX = 5;
+const CHAT_WINDOW_MS = 5000;
+
 export class LobbyRoom extends Room<LobbyState> {
   private lobbyPlayers = new Map<string, LobbyPlayer>();
+  private chatHistory = new Map<string, number[]>();
 
   private broadcastLobby(): void {
     this.broadcast('lobbyState', { players: Array.from(this.lobbyPlayers.values()) });
@@ -65,6 +70,12 @@ export class LobbyRoom extends Room<LobbyState> {
     this.onMessage('chat', (client, data: { message?: string }) => {
       const p = this.lobbyPlayers.get(client.sessionId);
       if (!p || !data?.message) return;
+      // Anti-spam: drop messages beyond CHAT_MAX per rolling CHAT_WINDOW_MS.
+      const nowChat = Date.now();
+      const hist = (this.chatHistory.get(client.sessionId) ?? []).filter((t) => nowChat - t < CHAT_WINDOW_MS);
+      if (hist.length >= CHAT_MAX) return;
+      hist.push(nowChat);
+      this.chatHistory.set(client.sessionId, hist);
       const message = data.message.slice(0, 100).trim();
       if (!message) return;
       this.broadcast('chat', {
@@ -120,6 +131,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
   onLeave(client: Client): void {
     this.lobbyPlayers.delete(client.sessionId);
+    this.chatHistory.delete(client.sessionId);
     this.state.playerCount = this.lobbyPlayers.size;
     console.log(`[LobbyRoom] left: ${client.sessionId} (total: ${this.state.playerCount})`);
   }

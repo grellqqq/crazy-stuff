@@ -10,6 +10,7 @@ import { LobbyRoom } from './rooms/LobbyRoom';
 import { QueueRoom } from './rooms/QueueRoom';
 import { RaceRoom } from './rooms/RaceRoom';
 import { authRouter } from './auth/routes';
+import { rateLimit } from './rate-limit';
 import { requireOwnership } from './auth/middleware';
 import { connectDB, resetInventoriesOnBoot } from './db/mongo';
 import {
@@ -19,13 +20,15 @@ import {
 } from './db/mongo';
 
 const app = express();
+// Behind one reverse proxy (Dokploy) — trust the first hop so req.ip is the real client IP.
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT ?? 3000);
 
 app.use(cors());
 app.use(express.json());
 
-// Auth routes
-app.use('/auth', authRouter);
+// Auth routes — throttled per-IP against credential-stuffing / brute-force (M3-2).
+app.use('/auth', rateLimit({ windowMs: 5 * 60_000, max: 30, message: 'Too many auth attempts — slow down and try again shortly.' }), authRouter);
 
 // Serve the built client (production mode)
 const clientDist = path.resolve(__dirname, '../../client/dist');
