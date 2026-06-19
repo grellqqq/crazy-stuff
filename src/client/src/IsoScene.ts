@@ -1270,6 +1270,39 @@ export class IsoScene extends Phaser.Scene {
   private loadedEquipment = new Set<string>();
   /** Set of equipment item+body keys (`${itemId}_${body}`) currently being loaded (pending). */
   private loadingEquipment = new Set<string>();
+  /** Per idle-anim key: index of the fullest (most complete) frame. Idle
+   *  overlays pin to this so broken back/side idle frames can't flash. */
+  private bestIdleFrame = new Map<string, number>();
+
+  /** Index of the idle sheet's most-complete frame (most opaque pixels).
+   *  Computed once per texture via an offscreen canvas. */
+  private fullestIdleFrame(texKey: string): number {
+    try {
+      const src = this.textures.get(texKey).getSourceImage() as HTMLImageElement;
+      const fs = src.height;
+      const n = Math.max(1, Math.floor(src.width / fs));
+      if (n <= 1) return 0;
+      const cv = document.createElement('canvas');
+      cv.width = src.width; cv.height = src.height;
+      const ctx = cv.getContext('2d');
+      if (!ctx) return 0;
+      ctx.drawImage(src, 0, 0);
+      const data = ctx.getImageData(0, 0, src.width, src.height).data;
+      let best = 0, bestCount = -1;
+      for (let f = 0; f < n; f++) {
+        let count = 0;
+        for (let y = 0; y < src.height; y++) {
+          for (let x = f * fs; x < (f + 1) * fs; x++) {
+            if (data[(y * src.width + x) * 4 + 3] > 0) count++;
+          }
+        }
+        if (count > bestCount) { bestCount = count; best = f; }
+      }
+      return best;
+    } catch {
+      return 0;
+    }
+  }
 
   /**
    * Apply a loadout to an avatar — loads missing spritesheets, then rebuilds layers.
@@ -1392,6 +1425,11 @@ export class IsoScene extends Phaser.Scene {
           frames: this.anims.generateFrameNumbers(idleTexture, { start: 0, end: 3 }),
           frameRate: 4, repeat: -1,
         });
+      }
+      // Idle overlays are pinned to their fullest frame so broken back/side
+      // idle frames (PixelLab dropouts) can't flash. Computed once per texture.
+      if (this.textures.exists(idleTexture) && !this.bestIdleFrame.has(idleKey)) {
+        this.bestIdleFrame.set(idleKey, this.fullestIdleFrame(idleTexture));
       }
     }
   }
@@ -1565,10 +1603,17 @@ export class IsoScene extends Phaser.Scene {
         equipSprite.play(equipAnimKey);
       }
 
-      // Lock equipment frame to the body's current frame so they never drift.
-      // bodyFrame.index is 1-based; convert to a 0-based array position and
-      // compare frame *objects* (not mixed-base indices, which was the old bug).
-      if (bodyFrame && equipSprite.anims.currentAnim) {
+      // Idle: pin to the fullest frame (broken back/side idle frames can't
+      // flash). Otherwise lock the layer to the body's current frame so walk/
+      // run/jump never drift. bodyFrame.index is 1-based → 0-based array pos.
+      if (equipAnimType === 'idle' && equipSprite.anims.currentAnim) {
+        const equipFrames = equipSprite.anims.currentAnim.frames;
+        const best = this.bestIdleFrame.get(equipAnimKey) ?? 0;
+        const target = equipFrames[Math.min(best, equipFrames.length - 1)];
+        if (target && equipSprite.anims.currentFrame !== target) {
+          equipSprite.anims.setCurrentFrame(target);
+        }
+      } else if (bodyFrame && equipSprite.anims.currentAnim) {
         const equipFrames = equipSprite.anims.currentAnim.frames;
         const target = equipFrames[Math.min(bodyFrame.index - 1, equipFrames.length - 1)];
         if (target && equipSprite.anims.currentFrame !== target) {

@@ -103,6 +103,9 @@ export class LobbyScene extends Phaser.Scene {
   private myEquipSig = '';
   private loadedEquip = new Set<string>();
   private loadingEquip = new Set<string>();
+  // Per idle texture: the index of its fullest (most complete) frame. Idle
+  // overlays are pinned to this so broken back/side idle frames can't flash.
+  private bestIdleFrame = new Map<string, number>();
   private lastSentX = 0;
   private lastSentY = 0;
   private lastSentMoving = false;
@@ -903,6 +906,40 @@ export class LobbyScene extends Phaser.Scene {
       if (this.textures.exists(i) && !this.anims.exists(`a_${i}`)) {
         this.anims.create({ key: `a_${i}`, frames: this.anims.generateFrameNumbers(i, { start: 0, end: 3 }), frameRate: 4, repeat: -1 });
       }
+      if (this.textures.exists(i) && !this.bestIdleFrame.has(i)) {
+        this.bestIdleFrame.set(i, this.fullestIdleFrame(i));
+      }
+    }
+  }
+
+  /** Index of the idle sheet's most-complete frame (most opaque pixels). Some
+   *  PixelLab back/side idle frames drop parts of the garment; pinning idle to
+   *  the fullest frame prevents the layer flashing. Computed once per texture. */
+  private fullestIdleFrame(texKey: string): number {
+    try {
+      const src = this.textures.get(texKey).getSourceImage() as HTMLImageElement;
+      const fs = src.height;
+      const n = Math.max(1, Math.floor(src.width / fs));
+      if (n <= 1) return 0;
+      const cv = document.createElement('canvas');
+      cv.width = src.width; cv.height = src.height;
+      const ctx = cv.getContext('2d');
+      if (!ctx) return 0;
+      ctx.drawImage(src, 0, 0);
+      const data = ctx.getImageData(0, 0, src.width, src.height).data;
+      let best = 0, bestCount = -1;
+      for (let f = 0; f < n; f++) {
+        let count = 0;
+        for (let y = 0; y < src.height; y++) {
+          for (let x = f * fs; x < (f + 1) * fs; x++) {
+            if (data[(y * src.width + x) * 4 + 3] > 0) count++;
+          }
+        }
+        if (count > bestCount) { bestCount = count; best = f; }
+      }
+      return best;
+    } catch {
+      return 0;
     }
   }
 
@@ -940,18 +977,31 @@ export class LobbyScene extends Phaser.Scene {
       s.setFlipX(flip);
       s.setDepth(baseDepth + 0.001 * idx);
       const eqKey = s.getData('eqKey');
-      const animKey = `a_equip_${eqKey}_${moving ? 'walk' : 'idle'}_${suffix}`;
-      if (this.anims.exists(animKey)) {
-        s.setVisible(true);
-        if (s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
-        // Lock the layer to the body's current frame (0-based array position).
-        if (bodyFrame && s.anims.currentAnim) {
-          const frames = s.anims.currentAnim.frames;
-          const tgt = frames[Math.min(bodyFrame.index - 1, frames.length - 1)];
-          if (tgt && s.anims.currentFrame !== tgt) s.anims.setCurrentFrame(tgt);
+      if (moving) {
+        // Walk: play + frame-lock the layer to the body's current frame.
+        const animKey = `a_equip_${eqKey}_walk_${suffix}`;
+        if (this.anims.exists(animKey)) {
+          s.setVisible(true);
+          if (s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
+          if (bodyFrame && s.anims.currentAnim) {
+            const frames = s.anims.currentAnim.frames;
+            const tgt = frames[Math.min(bodyFrame.index - 1, frames.length - 1)];
+            if (tgt && s.anims.currentFrame !== tgt) s.anims.setCurrentFrame(tgt);
+          }
+        } else {
+          s.setVisible(false);
         }
       } else {
-        s.setVisible(false);
+        // Idle: hold the fullest frame so broken back/side frames can't flash.
+        const idleTex = `equip_${eqKey}_idle_${suffix}`;
+        if (this.textures.exists(idleTex)) {
+          s.setVisible(true);
+          if (s.anims.isPlaying) s.anims.stop();
+          const best = this.bestIdleFrame.get(idleTex) ?? 0;
+          if (s.texture.key !== idleTex || s.frame.name !== String(best)) s.setTexture(idleTex, best);
+        } else {
+          s.setVisible(false);
+        }
       }
       idx++;
     }
