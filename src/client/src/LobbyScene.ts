@@ -120,7 +120,11 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.image('lobby_ground', '/tiles/lobby_ground.png');
+    // PostApo-Lands wasteland map (Szadi art): a single pre-composed 1280x720
+    // ground — varied dirt + central stone plaza + baked decals/props.
+    this.load.image('lobby_map', '/sprites/lobby/lobby_map.png');
+    // Animated gacha machine (industrial reactor): 4-frame orange-glow pulse.
+    this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
 
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
@@ -138,11 +142,11 @@ export class LobbyScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.cameras.main.setBackgroundColor('#1a1a2e');
 
-    // Ground — fit to screen, no overflow
-    const cx = width / 2;
+    // Ground — the pre-composed wasteland map (dirt + stone plaza + props),
+    // sized to the game canvas. Buildings + player render on top.
     const cy = height / 2;
 
-    this.add.image(cx, cy, 'lobby_ground').setDisplaySize(width, height).setDepth(-1);
+    this.add.image(0, 0, 'lobby_map').setOrigin(0, 0).setDepth(-3);
 
     this.groundBounds = {
       left: 40,
@@ -161,10 +165,10 @@ export class LobbyScene extends Phaser.Scene {
     this.buildingY = cy;
     this.drawBuilding(this.buildingX, this.buildingY);
 
-    // Gacha machine on the left
-    this.gachaX = 120;
+    // Gacha machine on the left (animated industrial reactor)
+    this.gachaX = 160;
     this.gachaY = cy;
-    this.drawGachaMachine(this.gachaX, this.gachaY);
+    this.createGachaMachine(this.gachaX, this.gachaY);
 
     // Top-center plaza: leaderboard wall (left) + coin shop (right), side by side
     this.boardX = width / 2 - 150;
@@ -448,45 +452,40 @@ export class LobbyScene extends Phaser.Scene {
 
   /** Draw a capsule-toy ("gachapon") machine. Placeholder art until real
    *  pixel-art lands — see gacha GDD §24. */
-  private drawGachaMachine(gx: number, gy: number): void {
-    const g = this.add.graphics().setDepth(5);
-
-    // Ground shadow
-    g.fillStyle(0x000000, 0.3);
-    g.fillEllipse(gx, gy + 80, 86, 20);
-
-    // Machine body (rounded) + darker base
-    g.fillStyle(0xcc2244, 1);
-    g.fillRoundedRect(gx - 38, gy - 28, 76, 106, 12);
-    g.fillStyle(0x88142e, 1);
-    g.fillRoundedRect(gx - 38, gy + 42, 76, 36, 12);
-
-    // Capsule chamber: dark backing + translucent glass dome
-    g.fillStyle(0x1a2433, 1);
-    g.fillCircle(gx, gy - 18, 33);
-    g.fillStyle(0x88ccee, 0.35);
-    g.fillCircle(gx, gy - 18, 29);
-
-    // Capsules inside the dome
-    const caps: Array<[number, number, number]> = [
-      [0xffdd44, -12, -8], [0x44bb44, 11, -2], [0xff66aa, -4, 6],
-      [0x66aaff, 14, -14], [0xaa66ff, 0, -16],
-    ];
-    for (const [c, ox, oy] of caps) {
-      g.fillStyle(c, 1);
-      g.fillCircle(gx + ox, gy - 18 + oy, 7);
+  /** Animated industrial gacha reactor — orange-glow pulse + green antenna
+   *  flash (the "ready" light). Replaces the old drawn capsule machine. */
+  private createGachaMachine(gx: number, gy: number): void {
+    if (!this.anims.exists('gacha_idle')) {
+      this.anims.create({
+        key: 'gacha_idle',
+        frames: this.anims.generateFrameNumbers('gacha_machine', { start: 0, end: 3 }),
+        frameRate: 6,
+        repeat: -1,
+      });
     }
+    const machine = this.add.sprite(gx, gy + 12, 'gacha_machine')
+      .setOrigin(0.5, 1).setDepth(6);
+    machine.play('gacha_idle');
 
-    // Dispenser slot + turn knob
-    g.fillStyle(0x141414, 1);
-    g.fillRoundedRect(gx - 16, gy + 50, 32, 18, 4);
-    g.fillStyle(0xffdd44, 1);
-    g.fillCircle(gx + 24, gy + 30, 5);
+    // Green antenna flash — a glowing dot at the antenna tip that pulses, then
+    // blinks bright every few seconds (the "pull me" status light).
+    const fw = machine.width, fh = machine.height; // frame 97x120
+    const tipX = gx + (80 - fw / 2);            // antenna tip ~x80 in the frame
+    const tipY = (gy + 12) - fh + 1;            // ~y1 (top), bottom-origin
+    const glow = this.add.circle(tipX, tipY, 4, 0x66ff66, 1).setDepth(7);
+    glow.setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: glow, alpha: 0.25, scale: 0.7, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    // periodic bright flash
+    this.tweens.add({
+      targets: glow, scale: 2.2, alpha: 1, duration: 140, yoyo: true,
+      repeat: -1, repeatDelay: 2600, ease: 'Quad.easeOut',
+    });
 
-    // Label
-    this.add.text(gx, gy + 14, 'GACHA', {
-      fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
-    }).setOrigin(0.5, 0.5).setDepth(6);
+    // Label above the machine (sprite top sits at ~gy-108).
+    this.add.text(gx, gy - 114, 'GACHA', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#9fe6ff', fontStyle: 'bold',
+      stroke: '#001018', strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(7);
   }
 
   /** Draw a standing notice board for the seasonal leaderboard (#23).
