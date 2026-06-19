@@ -33,7 +33,7 @@
 |---|---|---|---|
 | 07 | Player Movement | ✅ Done | 8-dir, server-authoritative, lobby + race |
 | 08 | Item / Inventory | ✅ Done | per-row inventory, slot conflicts, equip txn, loadout cache. GDD [08](08-item-inventory.md) |
-| 09 | Currency (Crazy Coins) | 🟡 Partial | earned + persisted; **no spend path** (no store) → M2 |
+| 09 | Currency (Crazy Coins) | ✅ Done | earned + persisted + **spendable** in the coin store (#25) |
 | 10 | Race Room (Colyseus) | ✅ Done | authoritative `RaceRoom.ts`. GDD [10](10-race-room.md) |
 
 ### Gameplay — Lobby (Layer 2–3)
@@ -69,7 +69,7 @@
 | # | System | Status | Notes |
 |---|---|---|---|
 | 24 | Gacha System | 🟡 Partial | free pull **done** (crypto-RNG, pity, idempotent txn, reveal anim, only tested system); **paid gated `PAID_ENABLED=off`** pending payment + legal → M4. GDD [24](24-gacha-system.md) |
-| 25 | Store System | ⬜ Not Started | coin store → M2; paid store → M4 |
+| 25 | Store System | 🟡 Partial | **coin store built** — admin-curated 5/month, rarity prices, transactional buy + lobby stall; unit+integration tested. Pending: admin curation page (admin repo) + live QA. Paid store → M4 |
 | 26 | Payment Integration (Stripe) | ⬜ Not Started | M4 |
 | 27 | Economy UI | 🟡 Partial | gacha pull UI done; store/payment UI not → M4 |
 
@@ -102,9 +102,9 @@
 
 ## Build Status Summary
 
-- **✅ Done (18):** 01, 02, 03, 04, 06, 07, 08, 10, 11, 15, 16, 17, 18, 19, 20, 22, 23, A1
-- **🟡 Partial (8):** 09, 12, 13, 21, 24, 27, 28, 32
-- **⬜ Not Started (11):** 05, 14, 25, 26, 29, 30, 31, 33, 34, 35, 36
+- **✅ Done (19):** 01, 02, 03, 04, 06, 07, 08, 09, 10, 11, 15, 16, 17, 18, 19, 20, 22, 23, A1
+- **🟡 Partial (8):** 12, 13, 21, 24, 25, 27, 28, 32
+- **⬜ Not Started (10):** 05, 14, 26, 29, 30, 31, 33, 34, 35, 36
 
 The **core loop is complete end-to-end**: login → lobby → queue → race → rewards → progression. Remaining work is breadth (content, economy spend-paths, social/housing) and launch-hardening (replica set, abuse/GDPR), not core risk. See [`production/roadmap.md`](../../production/roadmap.md).
 

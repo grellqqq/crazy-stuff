@@ -75,6 +75,11 @@ export class LobbyScene extends Phaser.Scene {
   private boardPrompt!: Phaser.GameObjects.Text;
   private leaderboardPanel: HTMLDivElement | null = null;
 
+  private shopX = 0;
+  private shopY = 0;
+  private shopPrompt!: Phaser.GameObjects.Text;
+  private shopPanel: HTMLDivElement | null = null;
+
   private groundBounds = { left: 0, right: 0, top: 0, bottom: 0 };
   private charKey = DEFAULT_CHAR_KEY;
   private profilePanel: HTMLDivElement | null = null;
@@ -161,10 +166,14 @@ export class LobbyScene extends Phaser.Scene {
     this.gachaY = cy;
     this.drawGachaMachine(this.gachaX, this.gachaY);
 
-    // Leaderboard wall at top-center
-    this.boardX = width / 2;
+    // Top-center plaza: leaderboard wall (left) + coin shop (right), side by side
+    this.boardX = width / 2 - 150;
     this.boardY = 120;
     this.drawLeaderboardWall(this.boardX, this.boardY);
+
+    this.shopX = width / 2 + 150;
+    this.shopY = 120;
+    this.drawCoinShop(this.shopX, this.shopY);
 
     // Register animations
     this.registerAnimations();
@@ -247,6 +256,24 @@ export class LobbyScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
+    // Coin shop interact prompt
+    this.shopPrompt = this.add.text(this.shopX, this.shopY - 64, '[E] Coin Shop', {
+      fontSize: '16px',
+      fontFamily: 'monospace',
+      color: '#ffdd44',
+      backgroundColor: '#000000aa',
+      padding: { x: 8, y: 4 },
+    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+
+    this.tweens.add({
+      targets: this.shopPrompt,
+      scaleY: 1.08,
+      duration: 500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
     // Input
     const kb = this.input.keyboard!;
     this.keys = {
@@ -262,6 +289,8 @@ export class LobbyScene extends Phaser.Scene {
       if (dGacha <= INTERACT_DIST) { this.toggleGacha(); return; }
       const dBoard = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.boardX, this.boardY);
       if (dBoard <= INTERACT_DIST) { this.toggleLeaderboard(); return; }
+      const dShop = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.shopX, this.shopY);
+      if (dShop <= INTERACT_DIST) { this.toggleShop(); return; }
       const dRace = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
       if (dRace <= INTERACT_DIST) this.enterRace();
     });
@@ -369,6 +398,8 @@ export class LobbyScene extends Phaser.Scene {
     this.gachaPrompt.setAlpha(dGacha <= INTERACT_DIST ? 1 : 0);
     const dBoard = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.boardX, this.boardY);
     this.boardPrompt.setAlpha(dBoard <= INTERACT_DIST ? 1 : 0);
+    const dShop = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.shopX, this.shopY);
+    this.shopPrompt.setAlpha(dShop <= INTERACT_DIST ? 1 : 0);
   }
 
   private resolveDir(w: boolean, a: boolean, s: boolean, d: boolean): string {
@@ -599,6 +630,186 @@ export class LobbyScene extends Phaser.Scene {
     } catch (e) {
       console.error('[Leaderboard] load failed:', e);
       content.innerHTML = '<p style="text-align:center;color:#c66">Couldn’t load the leaderboard. Try again.</p>';
+    }
+  }
+
+  /** Draw a market stall for the coin shop (#25). Placeholder art. */
+  private drawCoinShop(sx: number, sy: number): void {
+    const g = this.add.graphics().setDepth(5);
+
+    // Ground shadow
+    g.fillStyle(0x000000, 0.3);
+    g.fillEllipse(sx, sy + 56, 112, 18);
+
+    // Stall counter + posts
+    g.fillStyle(0x6a4a2a, 1);
+    g.fillRect(sx - 56, sy - 36, 8, 92);
+    g.fillRect(sx + 48, sy - 36, 8, 92);
+    g.fillStyle(0x7a5a36, 1);
+    g.fillRoundedRect(sx - 60, sy + 16, 120, 40, 6); // counter
+
+    // Striped awning
+    const stripeW = 24;
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(i % 2 === 0 ? 0xcc3344 : 0xf4f4f4, 1);
+      g.fillRect(sx - 60 + i * stripeW, sy - 48, stripeW, 22);
+    }
+    g.fillStyle(0x222222, 1);
+    g.fillRect(sx - 60, sy - 28, 120, 4);
+
+    // Coin emblem
+    g.fillStyle(0xffcc33, 1);
+    g.fillCircle(sx, sy - 4, 14);
+    g.fillStyle(0xe0a818, 1);
+    g.fillCircle(sx, sy - 4, 10);
+
+    this.add.text(sx, sy - 4, '¢', {
+      fontSize: '16px', fontFamily: 'monospace', color: '#7a5210', fontStyle: 'bold',
+    }).setOrigin(0.5, 0.5).setDepth(6);
+    this.add.text(sx, sy + 36, 'COIN SHOP', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5, 0.5).setDepth(6);
+  }
+
+  // ─── Coin Shop (#25; walk-up stall, monthly curated cosmetics for coins) ────
+
+  private toggleShop(): void {
+    if (this.shopPanel) { this.shopPanel.remove(); this.shopPanel = null; return; }
+    this.openShop();
+  }
+
+  private openShop(): void {
+    if (this.shopPanel) { this.shopPanel.remove(); this.shopPanel = null; }
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #1a1a2e; border: 2px solid #ffdd44; border-radius: 8px;
+      padding: 24px; width: 420px; max-height: 80vh; overflow-y: auto;
+      z-index: 9000; font-family: monospace; color: #eee;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    `;
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('keyup', (e) => e.stopPropagation());
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'X';
+    closeBtn.style.cssText = `
+      position: absolute; top: 8px; right: 12px; background: none; border: none;
+      color: #888; font-size: 18px; cursor: pointer; font-family: monospace; font-weight: bold;
+    `;
+    closeBtn.onclick = () => { this.shopPanel?.remove(); this.shopPanel = null; };
+    panel.appendChild(closeBtn);
+
+    const title = document.createElement('h2');
+    title.textContent = '\u{1F6D2} COIN SHOP';
+    title.style.cssText = 'margin: 0 0 4px; text-align: center; color: #ffdd44; font-size: 18px;';
+    panel.appendChild(title);
+
+    const content = document.createElement('div');
+    content.id = 'shop-content';
+    panel.appendChild(content);
+
+    document.body.appendChild(panel);
+    this.shopPanel = panel;
+    void this.renderShopContent(content);
+  }
+
+  private async renderShopContent(content: HTMLDivElement): Promise<void> {
+    content.innerHTML = '<p style="text-align:center;color:#888">Loading…</p>';
+    const authId = this.authState?.session?.user?.id;
+    try {
+      const storeRes = await fetch(`${this.apiBase()}/api/store`);
+      const store = await storeRes.json();
+      let coins = 0;
+      if (authId) {
+        const name = encodeURIComponent(this.authState?.username ?? 'Player');
+        const pRes = await fetch(`${this.apiBase()}/api/player/${authId}?username=${name}`, { headers: this.authHeader() });
+        if (pRes.ok) coins = (await pRes.json()).coins ?? 0;
+      }
+      content.innerHTML = '';
+
+      // Header — season label + coin balance.
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;color:#aaa;font-size:12px;margin-bottom:14px;';
+      const seasonSpan = document.createElement('span');
+      seasonSpan.textContent = `${seasonLabel(store.seasonId)} · 5 picks`;
+      const coinSpan = document.createElement('span');
+      coinSpan.style.cssText = 'color:#ffd84a;font-weight:bold;';
+      coinSpan.textContent = `\u{1F4B0} ${coins}`;
+      header.append(seasonSpan, coinSpan);
+      content.appendChild(header);
+
+      if (!store.items.length) {
+        const empty = document.createElement('p');
+        empty.style.cssText = 'text-align:center;color:#888;line-height:1.5;';
+        empty.textContent = "This month's shop isn't stocked yet — check back soon!";
+        content.appendChild(empty);
+        return;
+      }
+
+      for (const it of store.items) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:#12121e;margin-bottom:8px;';
+
+        const info = document.createElement('div');
+        info.style.flex = '1';
+        const name = document.createElement('div');
+        name.textContent = it.displayName; // textContent — no XSS from catalog names
+        name.style.color = LobbyScene.RARITY_COLORS[it.rarity] ?? '#eee';
+        const sub = document.createElement('div');
+        sub.style.cssText = 'font-size:11px;color:#666;text-transform:capitalize;';
+        sub.textContent = `${it.rarity} · ${String(it.slot).replace(/_/g, ' ')}`;
+        info.append(name, sub);
+
+        const price = document.createElement('span');
+        price.style.cssText = 'color:#ffd84a;font-size:13px;white-space:nowrap;';
+        price.textContent = `\u{1F4B0} ${it.price}`;
+
+        const buy = document.createElement('button');
+        const afford = coins >= it.price;
+        buy.textContent = afford ? 'Buy' : 'Need more';
+        buy.disabled = !afford || !authId;
+        buy.style.cssText = `padding:6px 12px;border:none;border-radius:5px;font-family:monospace;font-weight:bold;` +
+          `cursor:${afford && authId ? 'pointer' : 'not-allowed'};` +
+          `background:${afford && authId ? '#ffdd44' : '#333'};color:${afford && authId ? '#1a1a2e' : '#888'};`;
+        if (afford && authId) buy.onclick = () => void this.buyFromShop(it.id, it.displayName, content);
+
+        row.append(info, price, buy);
+        content.appendChild(row);
+      }
+
+      const status = document.createElement('div');
+      status.id = 'shop-status';
+      status.style.cssText = 'text-align:center;font-size:12px;margin-top:10px;min-height:16px;';
+      content.appendChild(status);
+    } catch (e) {
+      console.error('[Shop] load failed:', e);
+      content.innerHTML = '<p style="text-align:center;color:#c66">Couldn’t load the shop. Try again.</p>';
+    }
+  }
+
+  private async buyFromShop(itemId: string, name: string, content: HTMLDivElement): Promise<void> {
+    const authId = this.authState?.session?.user?.id;
+    if (!authId) return;
+    const setStatus = (msg: string, color: string) => {
+      const s = document.getElementById('shop-status');
+      if (s) { s.style.color = color; s.textContent = msg; }
+    };
+    setStatus('Buying…', '#aaa');
+    try {
+      const buyId = crypto.randomUUID();
+      const resp = await fetch(`${this.apiBase()}/api/player/${authId}/store/buy`, {
+        method: 'POST',
+        headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, buyId }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setStatus(data.message ?? 'Purchase failed.', '#e88'); return; }
+      await this.renderShopContent(content); // refresh balance + affordability
+      setStatus(`Bought ${name}! Find it in your inventory (I).`, '#9c9');
+    } catch (e) {
+      console.error('[Shop] buy failed:', e);
+      setStatus('Purchase failed.', '#e88');
     }
   }
 
@@ -1006,6 +1217,7 @@ export class LobbyScene extends Phaser.Scene {
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
     if (this.gachaPanel) { this.gachaPanel.remove(); this.gachaPanel = null; }
     if (this.leaderboardPanel) { this.leaderboardPanel.remove(); this.leaderboardPanel = null; }
+    if (this.shopPanel) { this.shopPanel.remove(); this.shopPanel = null; }
     if (this.chatBox) { this.chatBox.remove(); this.chatBox = null; }
     this.destroyQueueUI();
     if (this.queueRoom) { this.queueRoom.leave(); this.queueRoom = null; }

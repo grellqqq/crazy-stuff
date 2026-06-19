@@ -18,6 +18,7 @@ import {
   getInventory, equipItem, unequipItem,
   getGachaOdds, getGachaStatus, executePull, devGrantCredits, GachaError,
   getLeaderboard, getPlayerSeasonRank,
+  getCurrentStore, buyStoreItem, StoreError,
 } from './db/mongo';
 
 const app = express();
@@ -85,6 +86,34 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 });
 
+// Public coin store (#25) — this month's curated 5 items + prices.
+app.get('/api/store', async (_req, res) => {
+  try {
+    res.json(await getCurrentStore());
+  } catch (e) {
+    console.error('[API] store error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+});
+
+// Map a StoreError code → HTTP status + safe client message.
+const STORE_HTTP: Record<string, { status: number; message: string }> = {
+  ITEM_NOT_FOUND: { status: 400, message: 'That item is not available.' },
+  NOT_IN_STORE: { status: 409, message: "That item is not in this month's shop." },
+  INSUFFICIENT_COINS: { status: 402, message: 'Not enough Crazy Coins.' },
+  NO_PLAYER: { status: 404, message: 'Player not found.' },
+};
+
+function sendStoreError(res: express.Response, e: unknown): void {
+  const code = e instanceof StoreError ? e.code : null;
+  if (code && STORE_HTTP[code]) {
+    res.status(STORE_HTTP[code].status).json({ error: code, message: STORE_HTTP[code].message });
+  } else {
+    console.error('[API] store buy error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+}
+
 // All /api/player/:userId/* routes require a valid JWT whose subject matches :userId.
 // See design/gdd/03-authentication.md §3.7 for the contract.
 app.use('/api/player/:userId', requireOwnership);
@@ -96,6 +125,18 @@ app.get('/api/player/:userId/rank', async (req, res) => {
   } catch (e) {
     console.error('[API] rank error:', e);
     res.status(500).json({ error: 'db error' });
+  }
+});
+
+// Buy a coin-store item (#25). Transactional + idempotent on the client buyId.
+app.post('/api/player/:userId/store/buy', async (req, res) => {
+  try {
+    const { itemId, buyId } = req.body;
+    if (!itemId || typeof itemId !== 'string') return res.status(400).json({ error: 'itemId required' });
+    if (!buyId || typeof buyId !== 'string') return res.status(400).json({ error: 'buyId required' });
+    res.json(await buyStoreItem(req.params.userId, itemId, buyId));
+  } catch (e) {
+    sendStoreError(res, e);
   }
 });
 

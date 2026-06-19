@@ -1,6 +1,7 @@
 import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb';
-import { ITEMS } from '../../../shared/items';
+import { ITEMS, ItemDef } from '../../../shared/items';
 import { currentSeasonId } from '../../../shared/season';
+import { storePrice, inStorePool, STORE_SIZE } from '../../../shared/store';
 import {
   buildPool, pullBatch, computeOdds, cryptoRng, GACHA_CONFIG, RARITIES,
   freeAvailable, nextMidnightUTC,
@@ -49,6 +50,10 @@ export async function connectDB(): Promise<Db> {
   await db.collection('pulls').createIndex({ userId: 1, createdAt: -1 });
   // Seasonal leaderboard (#23): rank by season XP within the current season.
   await db.collection('players').createIndex({ seasonId: 1, seasonXp: -1 });
+  // Coin store (#25): one curated rotation per month; buyId is the buy idempotency key.
+  await db.collection('store_rotation').createIndex({ seasonId: 1 }, { unique: true });
+  await db.collection('purchases').createIndex({ buyId: 1 }, { unique: true });
+  await db.collection('purchases').createIndex({ userId: 1, createdAt: -1 });
 
   return db;
 }
@@ -680,4 +685,118 @@ export async function devGrantCredits(userId: string, amount: number) {
   await db.collection('players').updateOne({ userId }, { $inc: { pullCredits: n }, $set: { updatedAt: new Date() } });
   const player = await db.collection('players').findOne({ userId });
   return player?.pullCredits ?? 0;
+}
+
+// ─── Coin Store (#25, roadmap M2-3) ─────────────────────────────────────────
+// Admin-curated: 5 cosmetics per UTC month, bought with Crazy Coins. The
+// curated list lives in `store_rotation` (one doc per seasonId), set by the
+// admin dashboard. Prices are by rarity (shared/store.ts), server-authoritative.
+
+/** A typed error whose `.code` the HTTP layer maps to a client message. */
+export class StoreError extends Error {
+  constructor(public code: string) { super(code); this.name = 'StoreError'; }
+}
+
+/** The raw curated item ids for a season (empty if none set yet). */
+export async function getStoreRotation(seasonId: string) {
+  const doc = await db.collection('store_rotation').findOne({ seasonId });
+  return { seasonId, itemIds: (doc?.itemIds as string[]) ?? [] };
+}
+
+/**
+ * Set the curated rotation for a season (admin curation). Validates each id is
+ * a real, store-eligible catalog item; drops duplicates; caps at STORE_SIZE.
+ * Upserts the season's doc. Used by the admin dashboard + tests.
+ */
+export async function setStoreRotation(seasonId: string, itemIds: string[]) {
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const id of itemIds) {
+    if (seen.has(id)) continue;
+    const item = ITEMS[id];
+    if (!item || !inStorePool(item)) throw new StoreError('INVALID_ITEM');
+    seen.add(id);
+    clean.push(id);
+  }
+  if (clean.length > STORE_SIZE) throw new StoreError('TOO_MANY');
+  const now = new Date();
+  await db.collection('store_rotation').updateOne(
+    { seasonId },
+    { $set: { itemIds: clean, updatedAt: now }, $setOnInsert: { seasonId, createdAt: now } },
+    { upsert: true },
+  );
+  return { seasonId, itemIds: clean };
+}
+
+/** This month's store: the curated items resolved to {id, name, slot, rarity,
+ *  price}. Defensively drops any id that became store-ineligible. Public. */
+export async function getCurrentStore() {
+  const season = currentSeasonId();
+  const { itemIds } = await getStoreRotation(season);
+  const items = itemIds
+    .map((id) => ITEMS[id])
+    .filter((it): it is ItemDef => !!it && inStorePool(it))
+    .map((it) => ({
+      id: it.id, displayName: it.displayName, slot: it.slot,
+      rarity: it.rarity, price: storePrice(it),
+    }));
+  return { seasonId: season, items };
+}
+
+/**
+ * Buy a store item for coins, atomically and idempotently. Validates the item
+ * is store-eligible AND in the current month's curated rotation, then (in one
+ * transaction) debits coins, grants the item (unequipped), and records the
+ * purchase. Duplicates are allowed (no owned-check). `buyId` is the idempotency
+ * key — a retry returns the recorded outcome, never a double-charge.
+ */
+export async function buyStoreItem(userId: string, itemId: string, buyId: string) {
+  const purchases = db.collection('purchases');
+  const players = db.collection('players');
+  const inv = db.collection('inventory');
+
+  // Fast idempotency path (re-guarded by the unique index in the txn).
+  const prior = await purchases.findOne({ buyId });
+  if (prior) return { itemId: prior.itemId, price: prior.price, coins: prior.coinsAfter, idempotent: true };
+
+  const item = ITEMS[itemId];
+  if (!item || !inStorePool(item)) throw new StoreError('ITEM_NOT_FOUND');
+
+  const season = currentSeasonId();
+  const { itemIds } = await getStoreRotation(season);
+  if (!itemIds.includes(itemId)) throw new StoreError('NOT_IN_STORE');
+  const price = storePrice(item);
+
+  try {
+    return await withTransaction(async (session) => {
+      const player = await players.findOne({ userId }, { session });
+      if (!player) throw new StoreError('NO_PLAYER');
+      const coins = player.coins ?? 0;
+      if (coins < price) throw new StoreError('INSUFFICIENT_COINS');
+
+      const now = new Date();
+      const coinsAfter = coins - price;
+
+      await inv.insertOne({
+        playerId: player._id.toString(),
+        itemType: item.slot, itemId: item.id, rarity: item.rarity,
+        equipped: false, obtainedAt: now, source: 'store',
+      }, { session });
+
+      await players.updateOne({ userId }, { $set: { coins: coinsAfter, updatedAt: now } }, { session });
+
+      // Recording the purchase (unique buyId) is the idempotency commit point.
+      await purchases.insertOne({
+        buyId, userId, itemId, price, coinsAfter, seasonId: season, createdAt: now,
+      }, { session });
+
+      return { itemId, price, coins: coinsAfter };
+    });
+  } catch (e: any) {
+    if (e?.code === 11000) {
+      const rec = await purchases.findOne({ buyId });
+      if (rec) return { itemId: rec.itemId, price: rec.price, coins: rec.coinsAfter, idempotent: true };
+    }
+    throw e;
+  }
 }

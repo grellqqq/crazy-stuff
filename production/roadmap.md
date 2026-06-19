@@ -43,7 +43,7 @@ The gacha/pity machinery is built but **dormant** — only 25 Common + 1 Rare it
 |---|---|---|---|---|
 | M2-1 | **Nail down the full item catalog** — items per slot across Uncommon→Crazy tiers (design decision with Gabriel — see Open Topics) | M | Gabriel's item list | Approved catalog rows in `shared/items.ts` |
 | M2-2 | **Generate item art** (PixelLab) for the new tiers | M | **PixelLab reset** (0 gen now) | Sprite sheets on disk for every new catalog item; render in lobby + race |
-| M2-3 | **Coin store in the lobby** — a store location + UI to spend Crazy Coins on cosmetics (gives currency a sink) | M | M2-1 | Walk to store → buy with coins → item appears in inventory |
+| M2-3 | ✅ **DONE (game side)** — **Coin store in the lobby**: admin-curated 5 items/month, rarity-priced, transactional/idempotent buy, lobby Coin Shop stall ([E], top-center). *Admin curation page (admin repo) + live QA pending.* | M | M2-1 | Walk to store → buy with coins → item appears in inventory |
 | M2-4 | ✅ **DONE** — **Seasonal leaderboard + Leaderboard Wall** in the lobby (season-XP board, monthly UTC seasons, your-rank API, `[E]` wall top-center) | M | — | Top players by score/XP shown; wall location in lobby. *Placeholder wall art + live QA pending.* |
 | M2-5 | **Real gacha-machine art** (replace placeholder primitive) | S–M | PixelLab reset | Gacha machine uses finished art |
 
