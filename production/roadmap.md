@@ -59,7 +59,7 @@ Required before opening to the public.
 | M3-2 | **Auth + room rate-limiting** (register/login, message spam) | M | Brute-force / spam is throttled server-side |
 | M3-3 | **Password reset** flow (transactional email) | M | User can reset a forgotten password by email |
 | M3-4 | **Email verification** | M | New accounts verify their email |
-| M3-5 | **Account deletion** (GDPR) — user-initiated, purges their data | M | A user can delete their account + all associated data. **EU-blocking without it.** |
+| M3-5 | ✅ **DONE** — **Account deletion** (GDPR): transactional cascade purges users + players + inventory + pulls + purchases; profile "Delete account" with type-username confirm; integration-tested | M | A user can delete their account + all associated data. **EU-blocking without it.** |
 | M3-6 | **Ops basics** — structured logging, health/readiness, review graceful-degradation paths | S–M | Errors are logged with context; deploy has health checks |
 
 ---

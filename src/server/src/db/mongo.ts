@@ -249,6 +249,30 @@ export async function getUserById(userId: string) {
   return db.collection('users').findOne({ _id: new ObjectId(userId) });
 }
 
+/**
+ * GDPR account deletion (auth GDD §3 cascade): purge the user and ALL their
+ * data in one transaction — `users`, `players`, `inventory`, `pulls`,
+ * `purchases`. Idempotent (deleting an already-gone account is a no-op).
+ * `userId` is the string form of `users._id` (= `players.userId`).
+ */
+export async function deleteAccount(userId: string): Promise<{ deletedUser: boolean }> {
+  return withTransaction(async (session) => {
+    const player = await db.collection('players').findOne({ userId }, { session });
+    const playerId = player?._id.toString();
+    if (playerId) {
+      await db.collection('inventory').deleteMany({ playerId }, { session });
+    }
+    await db.collection('players').deleteMany({ userId }, { session });
+    await db.collection('pulls').deleteMany({ userId }, { session });
+    await db.collection('purchases').deleteMany({ userId }, { session });
+
+    let oid: ObjectId | null = null;
+    try { oid = new ObjectId(userId); } catch { /* malformed id — skip user row */ }
+    const res = oid ? await db.collection('users').deleteOne({ _id: oid }, { session }) : null;
+    return { deletedUser: (res?.deletedCount ?? 0) > 0 };
+  });
+}
+
 // ─── Player functions ───────────────────────────────────────────────────────
 
 /**

@@ -1403,6 +1403,63 @@ export class LobbyScene extends Phaser.Scene {
     document.body.appendChild(container);
   }
 
+  /** Append the account-deletion danger zone to the profile panel (M3-5). */
+  private appendDeleteAccount(panel: HTMLDivElement): void {
+    const authId = this.authState?.session?.user?.id;
+    const username = (this.authState?.username ?? '').trim();
+    const danger = document.createElement('div');
+    danger.style.cssText = 'border-top: 1px solid #5a2230; padding: 12px 16px;';
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '\u{1F5D1} Delete account';
+    delBtn.style.cssText = 'width:100%; padding:8px; background:#2a1320; border:1px solid #6a2436; border-radius:5px; color:#ff8080; font-family:monospace; cursor:pointer;';
+    danger.appendChild(delBtn);
+    panel.appendChild(danger);
+
+    delBtn.onclick = () => {
+      if (!authId) return;
+      delBtn.style.display = 'none';
+      const warn = document.createElement('div');
+      warn.style.cssText = 'font-size:11px; color:#e88; margin-bottom:8px; line-height:1.45;';
+      warn.textContent = `This permanently deletes your account, items, and progress — it cannot be undone. Type your username "${username}" to confirm.`;
+      const input = document.createElement('input');
+      input.placeholder = 'username';
+      input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px; background:#12121e; border:1px solid #444; border-radius:4px; color:#eee; font-family:monospace; margin-bottom:8px;';
+      input.addEventListener('keydown', (e) => e.stopPropagation());
+      input.addEventListener('keyup', (e) => e.stopPropagation());
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = 'Permanently delete';
+      confirmBtn.disabled = true;
+      const setConfirmStyle = (ok: boolean) => {
+        confirmBtn.style.cssText = `width:100%; padding:8px; border:1px solid #6a2436; border-radius:5px; font-family:monospace; ` +
+          `cursor:${ok ? 'pointer' : 'not-allowed'}; background:${ok ? '#7a1d34' : '#3a1422'}; color:${ok ? '#fff' : '#888'};`;
+      };
+      setConfirmStyle(false);
+      const status = document.createElement('div');
+      status.style.cssText = 'font-size:11px; text-align:center; margin-top:6px; min-height:14px;';
+      input.oninput = () => {
+        const ok = input.value.trim() === username && username.length > 0;
+        confirmBtn.disabled = !ok;
+        setConfirmStyle(ok);
+      };
+      confirmBtn.onclick = async () => {
+        confirmBtn.disabled = true;
+        status.style.color = '#aaa'; status.textContent = 'Deleting…';
+        try {
+          const resp = await fetch(`${this.apiBase()}/api/player/${authId}`, { method: 'DELETE', headers: this.authHeader() });
+          if (!resp.ok) { status.style.color = '#e88'; status.textContent = 'Deletion failed. Try again.'; confirmBtn.disabled = false; return; }
+          localStorage.clear();
+          window.location.reload();
+        } catch (e) {
+          console.error('[Account] delete failed:', e);
+          status.style.color = '#e88'; status.textContent = 'Deletion failed. Try again.'; confirmBtn.disabled = false;
+        }
+      };
+      danger.append(warn, input, confirmBtn, status);
+      input.focus();
+    };
+  }
+
   /** Toggle the Profile panel open/closed. */
   private toggleProfilePanel(): void {
     if (this.profilePanel) {
@@ -1464,6 +1521,10 @@ export class LobbyScene extends Phaser.Scene {
     closeBtn.onmouseleave = () => { closeBtn.style.color = '#888'; };
     closeBtn.onclick = () => { this.profilePanel?.remove(); this.profilePanel = null; };
     panel.appendChild(closeBtn);
+
+    // Danger zone — GDPR account deletion (M3-5). Reveals a type-your-username
+    // confirmation; on success the account + all its data are purged server-side.
+    this.appendDeleteAccount(panel);
 
     document.body.appendChild(panel);
     this.profilePanel = panel;

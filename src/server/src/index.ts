@@ -19,6 +19,7 @@ import {
   getGachaOdds, getGachaStatus, executePull, devGrantCredits, GachaError,
   getLeaderboard, getPlayerSeasonRank,
   getCurrentStore, buyStoreItem, StoreError,
+  deleteAccount,
 } from './db/mongo';
 
 const app = express();
@@ -124,6 +125,18 @@ app.get('/api/player/:userId/rank', async (req, res) => {
     res.json(await getPlayerSeasonRank(req.params.userId));
   } catch (e) {
     console.error('[API] rank error:', e);
+    res.status(500).json({ error: 'db error' });
+  }
+});
+
+// Delete the account + all its data (GDPR, M3-5). Authed via requireOwnership;
+// the client requires the user to type their username to confirm.
+app.delete('/api/player/:userId', async (req, res) => {
+  try {
+    const result = await deleteAccount(req.params.userId);
+    res.json(result);
+  } catch (e) {
+    console.error('[API] account deletion error:', e);
     res.status(500).json({ error: 'db error' });
   }
 });

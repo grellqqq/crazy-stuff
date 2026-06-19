@@ -152,10 +152,13 @@ login (lazily created by `getOrCreatePlayer`). The link is
 logical "account" split across two collections for separation of concerns:
 identity vs. gameplay state.
 
-**Cascade rule [PLANNED]:** if a `users` document is ever deleted (account
-deletion request, GDPR), the corresponding `players` doc and all
-`inventory` rows must be deleted in the same transaction. Today there's no
-delete-account flow.
+**Cascade rule [BUILT — M3-5]:** deleting a `users` document (GDPR account
+deletion) also deletes the corresponding `players` doc, all `inventory`
+rows, and the user's `pulls` + `purchases` — all in one transaction
+(`deleteAccount`, `db/mongo.ts`). Exposed as authed `DELETE
+/api/player/:userId` (requireOwnership); the client confirms by having the
+user type their username. Idempotent. Integration-tested
+(`tests/integration/account-deletion.int.test.ts`).
 
 ### 3.2 Email + Password Registration
 
