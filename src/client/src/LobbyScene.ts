@@ -128,6 +128,8 @@ export class LobbyScene extends Phaser.Scene {
     this.load.image('lobby_map', '/sprites/lobby/lobby_map.png');
     // Animated gacha machine (industrial reactor): 4-frame orange-glow pulse.
     this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
+    // Store storefront building.
+    this.load.image('store_building', '/sprites/lobby/store_building.png');
 
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
@@ -264,7 +266,7 @@ export class LobbyScene extends Phaser.Scene {
     });
 
     // Coin shop interact prompt
-    this.shopPrompt = this.add.text(this.shopX, this.shopY - 64, '[E] Coin Shop', {
+    this.shopPrompt = this.add.text(this.shopX, this.shopY - 64, '[E] Store', {
       fontSize: '16px',
       fontFamily: 'monospace',
       color: '#ffdd44',
@@ -635,42 +637,15 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  /** Draw a market stall for the coin shop (#25). Placeholder art. */
+  /** The Store building (#25) — a storefront the player walks up to. */
   private drawCoinShop(sx: number, sy: number): void {
-    const g = this.add.graphics().setDepth(5);
-
-    // Ground shadow
-    g.fillStyle(0x000000, 0.3);
-    g.fillEllipse(sx, sy + 56, 112, 18);
-
-    // Stall counter + posts
-    g.fillStyle(0x6a4a2a, 1);
-    g.fillRect(sx - 56, sy - 36, 8, 92);
-    g.fillRect(sx + 48, sy - 36, 8, 92);
-    g.fillStyle(0x7a5a36, 1);
-    g.fillRoundedRect(sx - 60, sy + 16, 120, 40, 6); // counter
-
-    // Striped awning
-    const stripeW = 24;
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle(i % 2 === 0 ? 0xcc3344 : 0xf4f4f4, 1);
-      g.fillRect(sx - 60 + i * stripeW, sy - 48, stripeW, 22);
-    }
-    g.fillStyle(0x222222, 1);
-    g.fillRect(sx - 60, sy - 28, 120, 4);
-
-    // Coin emblem
-    g.fillStyle(0xffcc33, 1);
-    g.fillCircle(sx, sy - 4, 14);
-    g.fillStyle(0xe0a818, 1);
-    g.fillCircle(sx, sy - 4, 10);
-
-    this.add.text(sx, sy - 4, '¢', {
-      fontSize: '16px', fontFamily: 'monospace', color: '#7a5210', fontStyle: 'bold',
-    }).setOrigin(0.5, 0.5).setDepth(6);
-    this.add.text(sx, sy + 36, 'COIN SHOP', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
-    }).setOrigin(0.5, 0.5).setDepth(6);
+    const building = this.add.image(sx, sy + 40, 'store_building')
+      .setOrigin(0.5, 1).setScale(0.5).setDepth(6);
+    // 'STORE' sign above the building.
+    this.add.text(sx, building.getTopCenter().y - 6, 'STORE', {
+      fontSize: '13px', fontFamily: 'monospace', color: '#ffeebb', fontStyle: 'bold',
+      stroke: '#1a0e08', strokeThickness: 4,
+    }).setOrigin(0.5, 1).setDepth(7);
   }
 
   // ─── Coin Shop (#25; walk-up stall, monthly curated cosmetics for coins) ────
@@ -703,7 +678,7 @@ export class LobbyScene extends Phaser.Scene {
     panel.appendChild(closeBtn);
 
     const title = document.createElement('h2');
-    title.textContent = '\u{1F6D2} COIN SHOP';
+    title.textContent = '\u{1F3EA} STORE';
     title.style.cssText = 'margin: 0 0 4px; text-align: center; color: #ffdd44; font-size: 18px;';
     panel.appendChild(title);
 
