@@ -175,14 +175,14 @@ export class LobbyScene extends Phaser.Scene {
     this.gachaY = cy;
     this.createGachaMachine(this.gachaX, this.gachaY);
 
-    // Top-center plaza: leaderboard wall (left) + coin shop (right), side by side
-    this.boardX = width / 2 - 150;
+    // Top plaza: Store (left, a bit lower) + Leaderboard wall (right).
+    this.shopX = width / 2 - 230;
+    this.shopY = 180;
+    this.drawCoinShop(this.shopX, this.shopY);
+
+    this.boardX = width / 2 + 230;
     this.boardY = 120;
     this.drawLeaderboardWall(this.boardX, this.boardY);
-
-    this.shopX = width / 2 + 150;
-    this.shopY = 120;
-    this.drawCoinShop(this.shopX, this.shopY);
 
     // Register animations
     this.registerAnimations();
