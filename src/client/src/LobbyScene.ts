@@ -642,7 +642,7 @@ export class LobbyScene extends Phaser.Scene {
     const building = this.add.image(sx, sy + 40, 'store_building')
       .setOrigin(0.5, 1).setScale(0.5).setDepth(6);
     // 'STORE' sign above the building.
-    this.add.text(sx - 24, building.getTopCenter().y + 54, 'STORE', {
+    this.add.text(sx - 12, building.getTopCenter().y + 54, 'STORE', {
       fontSize: '13px', fontFamily: 'monospace', color: '#ffeebb', fontStyle: 'bold',
       stroke: '#1a0e08', strokeThickness: 4,
     }).setOrigin(0.5, 1).setDepth(7);
