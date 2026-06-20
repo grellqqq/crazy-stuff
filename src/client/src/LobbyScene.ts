@@ -130,6 +130,9 @@ export class LobbyScene extends Phaser.Scene {
     this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
     // Store storefront building.
     this.load.image('store_building', '/sprites/lobby/store_building.png');
+    // Leaderboard billboard + race garage.
+    this.load.image('leaderboard_board', '/sprites/lobby/leaderboard_board.png');
+    this.load.image('race_building', '/sprites/lobby/race_building.png');
 
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
@@ -423,36 +426,19 @@ export class LobbyScene extends Phaser.Scene {
     return this.playerFacing;
   }
 
+  /** The Crazy Race entrance — a garage building you walk into to race. */
   private drawBuilding(bx: number, by: number): void {
-    const g = this.add.graphics().setDepth(5);
-
-    // Shadow
-    g.fillStyle(0x000000, 0.3);
-    g.fillRect(bx - 55 + 6, by - 80 + 8, 110, 160);
-
-    // Building body
-    g.fillStyle(0x2a2a4a, 1);
-    g.fillRect(bx - 55, by - 80, 110, 160);
-
-    // Roof
-    g.fillStyle(0x3a3a6a, 1);
-    g.fillRect(bx - 55, by - 80, 110, 18);
-
-    // Door
-    g.fillStyle(0x1a1a3a, 1);
-    g.fillRect(bx - 20, by + 20, 40, 60);
-    g.fillStyle(0xffcc44, 0.15);
-    g.fillRect(bx - 18, by + 22, 36, 56);
-    g.fillStyle(0xffcc44, 1);
-    g.fillCircle(bx + 12, by + 52, 3);
-
-    // Neon sign
-    g.lineStyle(2, 0xff4466, 1);
-    g.strokeRect(bx - 45, by - 68, 90, 24);
-
-    this.add.text(bx, by - 56, 'CRAZY RACE', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#ff4466', fontStyle: 'bold',
-    }).setOrigin(0.5, 0.5).setDepth(6);
+    const b = this.add.image(bx, by + 55, 'race_building')
+      .setOrigin(0.5, 1).setScale(0.62).setDepth(6);
+    // Glowing neon 'CRAZY RACE' sign.
+    const sign = this.add.text(bx, b.getTopCenter().y - 6, 'CRAZY RACE', {
+      fontSize: '14px', fontFamily: 'monospace', color: '#ff6aa0', fontStyle: 'bold',
+    }).setOrigin(0.5, 1).setDepth(7);
+    sign.setShadow(0, 0, '#ff1a66', 12, true, true); // neon halo
+    this.tweens.add({
+      targets: sign, alpha: { from: 1, to: 0.62 },
+      duration: 850, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+    });
   }
 
   /** Draw a capsule-toy ("gachapon") machine. Placeholder art until real
@@ -495,44 +481,14 @@ export class LobbyScene extends Phaser.Scene {
 
   /** Draw a standing notice board for the seasonal leaderboard (#23).
    *  Placeholder art until real pixel-art lands. */
+  /** Leaderboard billboard — a lit sign the player walks up to. */
   private drawLeaderboardWall(bx: number, by: number): void {
-    const g = this.add.graphics().setDepth(5);
-
-    // Ground shadow
-    g.fillStyle(0x000000, 0.3);
-    g.fillEllipse(bx, by + 56, 112, 18);
-
-    // Wooden posts
-    g.fillStyle(0x5a3d22, 1);
-    g.fillRect(bx - 56, by - 36, 8, 92);
-    g.fillRect(bx + 48, by - 36, 8, 92);
-
-    // Board panel + gold frame
-    g.fillStyle(0x2a2438, 1);
-    g.fillRoundedRect(bx - 60, by - 48, 120, 74, 8);
-    g.lineStyle(3, 0xffdd44, 1);
-    g.strokeRoundedRect(bx - 60, by - 48, 120, 74, 8);
-
-    // Header bar
-    g.fillStyle(0xffdd44, 1);
-    g.fillRoundedRect(bx - 60, by - 48, 120, 20, 8);
-
-    // Trophy
-    g.fillStyle(0xffcc33, 1);
-    g.fillRoundedRect(bx - 8, by - 14, 16, 13, 3);
-    g.fillRect(bx - 3, by - 1, 6, 7);
-    g.fillRect(bx - 10, by + 6, 20, 4);
-
-    // Ranking bars (decorative)
-    g.fillStyle(0xcccccc, 0.45);
-    g.fillRect(bx - 46, by - 14, 26, 4);
-    g.fillRect(bx - 46, by - 5, 20, 4);
-    g.fillRect(bx + 22, by - 14, 24, 4);
-    g.fillRect(bx + 22, by - 5, 16, 4);
-
-    this.add.text(bx, by - 38, 'LEADERBOARD', {
-      fontSize: '10px', fontFamily: 'monospace', color: '#1a1a2e', fontStyle: 'bold',
-    }).setOrigin(0.5, 0.5).setDepth(6);
+    const board = this.add.image(bx, by + 60, 'leaderboard_board')
+      .setOrigin(0.5, 1).setScale(1.6).setDepth(6);
+    this.add.text(bx, board.getTopCenter().y - 4, 'LEADERBOARD', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#ffe07a', fontStyle: 'bold',
+      stroke: '#1a1408', strokeThickness: 4,
+    }).setOrigin(0.5, 1).setDepth(7);
   }
 
   // ─── Leaderboard (#23; walk-up board, top players by season XP) ─────────────
