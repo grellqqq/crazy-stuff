@@ -762,10 +762,17 @@ When per-IP rate limits trigger, a CAPTCHA challenge can let legitimate
 users retry without waiting out the cooldown. Cloudflare Turnstile is the
 easy default — minimal UX disruption.
 
-### 3.10 Password Reset **[PLANNED]**
+### 3.10 Password Reset **[BUILT — M3-3]**
 
-No password reset today. Required before public launch — an indie game
-without a forgot-password flow is a support nightmare.
+Built via Gmail SMTP (nodemailer, `src/server/src/mailer.ts`). Flow below is
+implemented: `POST /auth/forgot-password` (always 200, anti-enumeration) mints
+a single-use token (`passwordResetTokens`, SHA-256 hashed at rest, 1-hour TTL
+index), emails the link, and `POST /auth/reset-password` consumes it
+transactionally. Client: "Forgot password?" on the login modal + a
+set-new-password view on the `?token=` deep link. Google-only accounts mint no
+token. Integration-tested (`tests/integration/password-reset.int.test.ts`).
+Deploy env: `SMTP_USER`, `SMTP_PASS` (Gmail App Password), `APP_URL`; without
+SMTP, the link is logged (dev fallback).
 
 #### Target flow
 

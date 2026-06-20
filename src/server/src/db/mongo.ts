@@ -1,4 +1,5 @@
 import { MongoClient, Db, ObjectId, ClientSession } from 'mongodb';
+import crypto from 'crypto';
 import { ITEMS, ItemDef } from '../../../shared/items';
 import { currentSeasonId } from '../../../shared/season';
 import { storePrice, inStorePool, STORE_SIZE } from '../../../shared/store';
@@ -54,6 +55,9 @@ export async function connectDB(): Promise<Db> {
   await db.collection('store_rotation').createIndex({ seasonId: 1 }, { unique: true });
   await db.collection('purchases').createIndex({ buyId: 1 }, { unique: true });
   await db.collection('purchases').createIndex({ userId: 1, createdAt: -1 });
+  // Password reset (auth GDD §3.10): lookup by token hash; TTL auto-purges expired.
+  await db.collection('passwordResetTokens').createIndex({ tokenHash: 1 });
+  await db.collection('passwordResetTokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
   return db;
 }
@@ -270,6 +274,64 @@ export async function deleteAccount(userId: string): Promise<{ deletedUser: bool
     try { oid = new ObjectId(userId); } catch { /* malformed id — skip user row */ }
     const res = oid ? await db.collection('users').deleteOne({ _id: oid }, { session }) : null;
     return { deletedUser: (res?.deletedCount ?? 0) > 0 };
+  });
+}
+
+// ─── Password reset (auth GDD §3.10) ────────────────────────────────────────
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Begin a password reset: if a PASSWORD account exists for `email`, mint a
+ * single-use token (stored hashed, 1-hour expiry) and return the raw token +
+ * email so the caller can send the link. Returns null when no eligible account
+ * exists (Google-only users have no password) — the caller must still respond
+ * 200 to avoid leaking which emails are registered.
+ */
+export async function createPasswordReset(email: string): Promise<{ token: string; email: string } | null> {
+  const user = await findUserByEmail(email);
+  if (!user || !user.passwordHash) return null;
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = new Date();
+  await db.collection('passwordResetTokens').insertOne({
+    userId: user._id.toString(),
+    tokenHash: hashToken(token),
+    expiresAt: new Date(now.getTime() + 60 * 60 * 1000), // 1 hour
+    used: false,
+    createdAt: now,
+  });
+  return { token, email: user.email };
+}
+
+/**
+ * Consume a reset token and set the new (already-bcrypt-hashed) password.
+ * Validates the token is unexpired + unused, marks it used, and updates the
+ * password — all in one transaction. Returns false for an invalid/expired/used
+ * token (idempotent: a second use fails cleanly).
+ */
+export async function resetPasswordWithToken(token: string, passwordHash: string): Promise<boolean> {
+  const tokenHash = hashToken(token);
+  const now = new Date();
+  return withTransaction(async (session) => {
+    const doc = await db.collection('passwordResetTokens').findOne(
+      { tokenHash, used: false, expiresAt: { $gt: now } },
+      { session },
+    );
+    if (!doc) return false;
+    const claim = await db.collection('passwordResetTokens').updateOne(
+      { _id: doc._id, used: false },
+      { $set: { used: true, usedAt: now } },
+      { session },
+    );
+    if (claim.modifiedCount === 0) return false; // lost the race — already used
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(doc.userId) },
+      { $set: { passwordHash } },
+      { session },
+    );
+    return true;
   });
 }
 

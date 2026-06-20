@@ -121,8 +121,93 @@ function googleSignIn(): Promise<string> {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+const MODAL_CARD = 'background: #1a1a2e; border: 2px solid #444; border-radius: 8px; padding: 32px; width: 340px; color: #eee;';
+const MODAL_OVERLAY = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; font-family: monospace;';
+const MODAL_INPUT = 'width: 100%; padding: 10px; margin-bottom: 12px; background: #222; border: 1px solid #555; color: #fff; border-radius: 4px; box-sizing: border-box; font-family: monospace;';
+const MODAL_BTN = 'width: 100%; padding: 10px; background: #4488ff; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold;';
+
+/** "Forgot password?" — collect an email and request a reset link. */
+function showForgotPassword(): void {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = MODAL_OVERLAY + 'z-index: 10001;';
+  overlay.addEventListener('keydown', (e) => e.stopPropagation());
+  overlay.addEventListener('keyup', (e) => e.stopPropagation());
+  overlay.innerHTML = `
+    <div style="${MODAL_CARD}">
+      <h2 style="text-align:center;margin:0 0 8px;color:#fff;font-size:18px;">Reset password</h2>
+      <p style="font-size:12px;color:#aaa;margin:0 0 16px;text-align:center;">Enter your account email — we'll send a reset link.</p>
+      <div id="fp-msg" style="font-size:12px;margin-bottom:10px;display:none;"></div>
+      <input id="fp-email" type="email" placeholder="Email" style="${MODAL_INPUT}" />
+      <button id="fp-send" style="${MODAL_BTN}">Send reset link</button>
+      <p id="fp-back" style="text-align:center;margin:14px 0 0;font-size:12px;color:#4488ff;cursor:pointer;text-decoration:underline;">Back to login</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  (document.getElementById('fp-back') as HTMLElement).onclick = close;
+  const msg = document.getElementById('fp-msg') as HTMLDivElement;
+  (document.getElementById('fp-send') as HTMLButtonElement).onclick = async () => {
+    const email = (document.getElementById('fp-email') as HTMLInputElement).value.trim();
+    if (!email) { msg.style.display = 'block'; msg.style.color = '#ff6666'; msg.textContent = 'Enter your email.'; return; }
+    await apiPost('/auth/forgot-password', { email }); // always 200
+    msg.style.display = 'block'; msg.style.color = '#66cc66';
+    msg.textContent = 'If that account exists, a reset link is on its way. Check your email.';
+  };
+  (document.getElementById('fp-email') as HTMLInputElement).focus();
+}
+
+/** Reset-password view shown when the URL carries a `?token=`. Resolves once
+ *  the user finishes (success or cancel); clears the token from the URL. */
+function showResetPassword(token: string): Promise<void> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = MODAL_OVERLAY;
+    overlay.addEventListener('keydown', (e) => e.stopPropagation());
+    overlay.addEventListener('keyup', (e) => e.stopPropagation());
+    overlay.innerHTML = `
+      <div style="${MODAL_CARD}">
+        <h2 style="text-align:center;margin:0 0 16px;color:#fff;font-size:18px;">Set a new password</h2>
+        <div id="rp-msg" style="font-size:12px;margin-bottom:10px;display:none;"></div>
+        <input id="rp-pw" type="password" placeholder="New password (min 6)" style="${MODAL_INPUT}" />
+        <input id="rp-pw2" type="password" placeholder="Confirm new password" style="${MODAL_INPUT}" />
+        <button id="rp-save" style="${MODAL_BTN}">Update password</button>
+        <p id="rp-cancel" style="text-align:center;margin:14px 0 0;font-size:12px;color:#888;cursor:pointer;text-decoration:underline;">Cancel</p>
+      </div>`;
+    document.body.appendChild(overlay);
+    const finishUp = () => {
+      // Strip ?token from the URL so a refresh doesn't reopen this.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('token');
+      window.history.replaceState({}, '', url.toString());
+      overlay.remove();
+      resolve();
+    };
+    const msg = document.getElementById('rp-msg') as HTMLDivElement;
+    (document.getElementById('rp-cancel') as HTMLElement).onclick = finishUp;
+    (document.getElementById('rp-save') as HTMLButtonElement).onclick = async () => {
+      const pw = (document.getElementById('rp-pw') as HTMLInputElement).value;
+      const pw2 = (document.getElementById('rp-pw2') as HTMLInputElement).value;
+      const fail = (t: string) => { msg.style.display = 'block'; msg.style.color = '#ff6666'; msg.textContent = t; };
+      if (pw.length < 6) return fail('Password must be at least 6 characters.');
+      if (pw !== pw2) return fail('Passwords do not match.');
+      const result = await apiPost('/auth/reset-password', { token, password: pw });
+      if (!result.ok) return fail(result.error || 'This reset link is invalid or expired.');
+      msg.style.display = 'block'; msg.style.color = '#66cc66';
+      msg.textContent = 'Password updated! You can log in now.';
+      setTimeout(finishUp, 1400);
+    };
+    (document.getElementById('rp-pw') as HTMLInputElement).focus();
+  });
+}
+
 /** Check for existing session or show login/register UI. */
 export async function authenticate(): Promise<AuthState> {
+  // Password-reset deep link (auth GDD §3.10): show the set-new-password form
+  // before anything else, then fall through to normal login.
+  const resetToken = new URLSearchParams(window.location.search).get('token');
+  if (resetToken) {
+    await showResetPassword(resetToken);
+  }
+
   // Check saved token
   const saved = loadAuth();
   if (saved) {
@@ -167,6 +252,7 @@ export async function authenticate(): Promise<AuthState> {
         <button id="auth-login" style="width: 100%; padding: 10px; background: #4488ff; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold;">LOGIN</button>
         <button id="auth-register" style="width: 100%; padding: 10px; background: #44bb44; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; display: none; margin-top: 8px;">REGISTER</button>
         <p id="auth-toggle" style="text-align: center; margin: 12px 0 0; font-size: 12px; color: #4488ff; cursor: pointer; text-decoration: underline;">Need an account? Create here!</p>
+        <p id="auth-forgot" style="text-align: center; margin: 8px 0 0; font-size: 11px; color: #888; cursor: pointer; text-decoration: underline;">Forgot password?</p>
         <div style="text-align: center; margin: 16px 0 0; border-top: 1px solid #333; padding-top: 12px;">
           <button id="auth-google" style="width: 100%; padding: 10px; background: #fff; border: none; color: #333; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold;">
             Sign in with Google
@@ -209,13 +295,16 @@ export async function authenticate(): Promise<AuthState> {
     const registerBtn = document.getElementById('auth-register') as HTMLButtonElement;
     const toggleText = document.getElementById('auth-toggle') as HTMLElement;
 
+    const forgotLink = document.getElementById('auth-forgot') as HTMLElement;
     document.getElementById('auth-toggle')!.onclick = () => {
       registerMode = !registerMode;
       emailInput.style.display = registerMode ? 'block' : 'none';
       loginBtn.style.display = registerMode ? 'none' : 'block';
       registerBtn.style.display = registerMode ? 'block' : 'none';
+      forgotLink.style.display = registerMode ? 'none' : 'block';
       toggleText.textContent = registerMode ? 'Already have an account?' : 'Need an account? Create here!';
     };
+    forgotLink.onclick = () => showForgotPassword();
 
     // ── LOGIN (username + password) ──
     document.getElementById('auth-login')!.onclick = async () => {

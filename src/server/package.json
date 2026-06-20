@@ -7,13 +7,15 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@types/nodemailer": "^8.0.1",
     "bcryptjs": "^3.0.3",
     "colyseus": "^0.15.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",
-    "mongodb": "^7.1.1"
+    "mongodb": "^7.1.1",
+    "nodemailer": "^9.0.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

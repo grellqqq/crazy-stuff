@@ -4,7 +4,9 @@ import jwt from 'jsonwebtoken';
 import {
   findUserByEmail, findUserByUsername, findUserByGoogleSub, createUser, createGoogleUser,
   linkGoogleToUser, getUserById, getOrCreatePlayer,
+  createPasswordReset, resetPasswordWithToken,
 } from '../db/mongo';
+import { sendPasswordResetEmail } from '../mailer';
 import { JWT_SECRET, signToken, type JwtPayload } from './jwt';
 
 const router = Router();
@@ -197,6 +199,52 @@ router.post('/google/link', async (req, res) => {
   } catch (e) {
     console.error('[Auth] google/link error:', e);
     res.status(500).json({ error: 'Failed to link Google account' });
+  }
+});
+
+// ─── POST /auth/forgot-password ─────────────────────────────────────────────
+// Always 200 (never leak which emails are registered). Rate-limited via the
+// /auth limiter. Sends a reset link if a password account exists.
+
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    const result = await createPasswordReset(email);
+    if (result) {
+      const base = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const link = `${base}/?token=${result.token}`;
+      // Don't block the response on the SMTP round-trip; log failures only.
+      sendPasswordResetEmail(result.email, link).catch((e) => console.error('[Auth] reset email failed:', e));
+    }
+  } catch (e) {
+    console.error('[Auth] forgot-password error:', e);
+  }
+  res.json({ ok: true });
+});
+
+// ─── POST /auth/reset-password ──────────────────────────────────────────────
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ error: 'token and password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const ok = await resetPasswordWithToken(token, passwordHash);
+    if (!ok) {
+      return res.status(400).json({ error: 'This reset link is invalid or has expired.' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Auth] reset-password error:', e);
+    res.status(500).json({ error: 'Password reset failed' });
   }
 });
 
