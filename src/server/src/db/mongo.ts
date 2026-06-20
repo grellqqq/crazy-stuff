@@ -64,6 +64,17 @@ export async function connectDB(): Promise<Db> {
 
 export function getDB(): Db { return db; }
 
+/** Readiness probe (M3-6): true if the DB is connected and answering. */
+export async function pingDB(): Promise<boolean> {
+  try {
+    if (!db) return false;
+    await db.command({ ping: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * One-time inventory reset, run on server boot and gated by env:
  *   INVENTORY_RESET_KEEP_EMAIL — the account to PRESERVE (keeps all its items).

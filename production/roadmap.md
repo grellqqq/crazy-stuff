@@ -60,7 +60,7 @@ Required before opening to the public.
 | M3-3 | ✅ **DONE** — **Password reset** via Gmail SMTP (nodemailer): forgot-password (anti-enumeration 200) → 1hr single-use hashed token → reset link → set-new-password UI; integration-tested. **Deploy needs env: `SMTP_USER`, `SMTP_PASS` (Gmail app password), `APP_URL`** | M | User can reset a forgotten password by email |
 | M3-4 | **Email verification** | M | New accounts verify their email |
 | M3-5 | ✅ **DONE** — **Account deletion** (GDPR): transactional cascade purges users + players + inventory + pulls + purchases; profile "Delete account" with type-username confirm; integration-tested | M | A user can delete their account + all associated data. **EU-blocking without it.** |
-| M3-6 | **Ops basics** — structured logging, health/readiness, review graceful-degradation paths | S–M | Errors are logged with context; deploy has health checks |
+| M3-6 | ✅ **DONE** — **Ops basics**: structured logger (`logger.ts`, JSON in prod), per-request logging middleware (method/path/status/ms), `/health` (liveness) + `/ready` (DB readiness, 503 until connected), graceful SIGTERM/SIGINT shutdown (drain Colyseus rooms + close DB) | S–M | Errors are logged with context; deploy has health checks |
 
 ---
 
