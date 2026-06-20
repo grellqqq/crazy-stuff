@@ -430,14 +430,20 @@ export class LobbyScene extends Phaser.Scene {
   private drawBuilding(bx: number, by: number): void {
     const b = this.add.image(bx, by + 55, 'race_building')
       .setOrigin(0.5, 1).setScale(0.62).setDepth(6);
-    // Glowing neon 'CRAZY RACE' sign.
+    // Vivid red+yellow glowing neon 'CRAZY RACE' sign.
     const sign = this.add.text(bx, b.getTopCenter().y - 6, 'CRAZY RACE', {
-      fontSize: '14px', fontFamily: 'monospace', color: '#ff6aa0', fontStyle: 'bold',
+      fontSize: '16px', fontFamily: 'monospace', fontStyle: 'bold',
     }).setOrigin(0.5, 1).setDepth(7);
-    sign.setShadow(0, 0, '#ff1a66', 12, true, true); // neon halo
+    const grad = sign.context.createLinearGradient(0, 0, 0, sign.height);
+    grad.addColorStop(0, '#fff27a');   // hot yellow core (top)
+    grad.addColorStop(0.5, '#ffc400'); // amber
+    grad.addColorStop(1, '#ff2a00');   // red (bottom)
+    sign.setFill(grad);
+    sign.setStroke('#5a0800', 2);
+    sign.setShadow(0, 0, '#ff3a00', 16, true, true); // red glow halo
     this.tweens.add({
-      targets: sign, alpha: { from: 1, to: 0.62 },
-      duration: 850, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      targets: sign, alpha: { from: 1, to: 0.82 },
+      duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     });
   }
 
