@@ -129,9 +129,11 @@ app.get('/api/player/:userId/rank', async (req, res) => {
   }
 });
 
-// Delete the account + all its data (GDPR, M3-5). Authed via requireOwnership;
-// the client requires the user to type their username to confirm.
-app.delete('/api/player/:userId', async (req, res) => {
+// Delete the account + all its data (GDPR, M3-5). Authorization is enforced
+// twice for this irreversible op: the path-level `app.use(requireOwnership)`
+// above AND an explicit `requireOwnership` here (JWT `sub` must equal :userId).
+// The client's type-username prompt is UX only, never authorization.
+app.delete('/api/player/:userId', requireOwnership, async (req, res) => {
   try {
     const result = await deleteAccount(req.params.userId);
     res.json(result);
