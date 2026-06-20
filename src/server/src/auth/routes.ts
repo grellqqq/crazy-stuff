@@ -214,10 +214,17 @@ router.post('/forgot-password', async (req, res) => {
     }
     const result = await createPasswordReset(email);
     if (result) {
-      const base = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const link = `${base}/?token=${result.token}`;
-      // Don't block the response on the SMTP round-trip; log failures only.
-      sendPasswordResetEmail(result.email, link).catch((e) => console.error('[Auth] reset email failed:', e));
+      // SECURITY: never derive the reset-link base from the request Host header
+      // (password-reset poisoning — a forged Host makes the victim's email link
+      // to an attacker's site, leaking the token). Require an explicit APP_URL.
+      const base = process.env.APP_URL?.replace(/\/+$/, '');
+      if (!base) {
+        console.warn(`[Auth] APP_URL not configured — reset link NOT emailed. Dev token for ${result.email}: ${result.token}`);
+      } else {
+        const link = `${base}/?token=${result.token}`;
+        // Don't block the response on the SMTP round-trip; log failures only.
+        sendPasswordResetEmail(result.email, link).catch((e) => console.error('[Auth] reset email failed:', e));
+      }
     }
   } catch (e) {
     console.error('[Auth] forgot-password error:', e);
