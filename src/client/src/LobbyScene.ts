@@ -169,7 +169,7 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     // Building on the right
-    this.buildingX = width - 120;
+    this.buildingX = width - 220;
     this.buildingY = cy;
     this.drawBuilding(this.buildingX, this.buildingY);
 
