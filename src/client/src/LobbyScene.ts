@@ -49,6 +49,16 @@ const MOVE_SPEED = 180;
 const DEFAULT_CHAR_KEY = 'male';
 const INTERACT_DIST = 100;
 
+// Gatchaman — the cyborg cowboy drag queen NPC who hawks the gacha machine.
+// Square frame size of the idle spritesheet (set from the PixelLab export).
+const GATCHAMAN_FRAME = 128;
+// He stands beside the machine and cycles these barks in a bubble over his head.
+const GATCHAMAN_LINES = [
+  'Try your luck in the Gacha Machine, buddy!',
+  'You can get all sorts of stuff here, crazy stuff!',
+  'Just roll it, Motherf...!',
+];
+
 export class LobbyScene extends Phaser.Scene {
   private authState: AuthState | null = null;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
@@ -69,6 +79,11 @@ export class LobbyScene extends Phaser.Scene {
   private gachaY = 0;
   private gachaPrompt!: Phaser.GameObjects.Text;
   private gachaPanel: HTMLDivElement | null = null;
+
+  private gatchamanX = 0;
+  private gatchamanY = 0;
+  private gatchaman?: Phaser.GameObjects.Sprite;
+  private gatchamanBubble?: Phaser.GameObjects.Text;
 
   private boardX = 0;
   private boardY = 0;
@@ -128,6 +143,8 @@ export class LobbyScene extends Phaser.Scene {
     this.load.image('lobby_map', '/sprites/lobby/lobby_map.png');
     // Animated gacha machine (industrial reactor): 4-frame orange-glow pulse.
     this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
+    // Gatchaman NPC — cyborg cowboy drag queen, south-facing breathing idle.
+    this.load.spritesheet('gatchaman_idle', '/sprites/lobby/gatchaman_idle.png', { frameWidth: GATCHAMAN_FRAME, frameHeight: GATCHAMAN_FRAME });
     // Store storefront building.
     this.load.image('store_building', '/sprites/lobby/store_building.png');
     // Leaderboard billboard + race garage.
@@ -177,6 +194,11 @@ export class LobbyScene extends Phaser.Scene {
     this.gachaX = 160;
     this.gachaY = cy;
     this.createGachaMachine(this.gachaX, this.gachaY);
+
+    // Gatchaman NPC — stands just to the right of the machine, hawking pulls.
+    this.gatchamanX = this.gachaX + 104;
+    this.gatchamanY = this.gachaY + 20;
+    this.createGatchaman(this.gatchamanX, this.gatchamanY);
 
     // Top plaza: Store (left, a bit lower) + Leaderboard wall (right).
     this.shopX = width / 2 - 230;
@@ -483,6 +505,58 @@ export class LobbyScene extends Phaser.Scene {
       fontSize: '12px', fontFamily: 'monospace', color: '#9fe6ff', fontStyle: 'bold',
       stroke: '#001018', strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(7);
+  }
+
+  /** Gatchaman — the cyborg cowboy drag queen NPC beside the gacha machine.
+   *  Plays a looping breathing idle and chatters barks in a bubble overhead. */
+  private createGatchaman(gx: number, gy: number): void {
+    if (!this.textures.exists('gatchaman_idle')) return; // sprite not shipped yet
+    if (!this.anims.exists('gatchaman_idle')) {
+      const tex = this.textures.get('gatchaman_idle');
+      const frameCount = tex.frameTotal - 1; // Phaser appends a __BASE frame
+      this.anims.create({
+        key: 'gatchaman_idle',
+        frames: this.anims.generateFrameNumbers('gatchaman_idle', { start: 0, end: Math.max(0, frameCount - 1) }),
+        frameRate: 3,
+        repeat: -1,
+      });
+    }
+    // Scale his 128px frame down to match player avatars (92px @ 0.75 ≈ 69px).
+    this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
+      .setScale(0.55).setOrigin(0.5, 0.9).setDepth(7);
+    this.gatchaman.play('gatchaman_idle');
+    this.startGatchamanChatter();
+  }
+
+  /** Cycle Gatchaman's barks: first one shortly after spawn, then every ~7s. */
+  private startGatchamanChatter(): void {
+    let i = 0;
+    const say = (): void => {
+      if (!this.gatchaman?.active) return;
+      this.showGatchamanBubble(GATCHAMAN_LINES[i % GATCHAMAN_LINES.length]);
+      i++;
+    };
+    this.time.delayedCall(1800, say);
+    this.time.addEvent({ delay: 7000, loop: true, callback: say });
+  }
+
+  /** A wrapped speech bubble over Gatchaman's head that fades after a few sec. */
+  private showGatchamanBubble(text: string): void {
+    if (!this.gatchaman) return;
+    this.gatchamanBubble?.destroy();
+    const bubble = this.add.text(this.gatchamanX, this.gatchamanY - 84, text, {
+      fontSize: '11px', fontFamily: 'monospace', color: '#ffe6ff',
+      backgroundColor: '#1a001acc', padding: { x: 7, y: 4 },
+      align: 'center', wordWrap: { width: 160 },
+    }).setOrigin(0.5, 1).setDepth(50);
+    this.gatchamanBubble = bubble;
+    this.tweens.add({
+      targets: bubble, alpha: 0, duration: 800, delay: 4800,
+      onComplete: () => {
+        bubble.destroy();
+        if (this.gatchamanBubble === bubble) this.gatchamanBubble = undefined;
+      },
+    });
   }
 
   /** Draw a standing notice board for the seasonal leaderboard (#23).
