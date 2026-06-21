@@ -59,6 +59,9 @@ const GATCHAMAN_LINES = [
   'Just roll it, Motherf...!',
 ];
 
+// Square frame size of the band-member spritesheets (PixelLab standard 64px → 92 canvas).
+const BAND_FRAME = 92;
+
 export class LobbyScene extends Phaser.Scene {
   private authState: AuthState | null = null;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
@@ -145,6 +148,17 @@ export class LobbyScene extends Phaser.Scene {
     this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
     // Gatchaman NPC — cyborg cowboy drag queen, south-facing breathing idle.
     this.load.spritesheet('gatchaman_idle', '/sprites/lobby/gatchaman_idle.png', { frameWidth: GATCHAMAN_FRAME, frameHeight: GATCHAMAN_FRAME });
+    // Rock band stage centerpiece: stage platform, neon CRAZY STUFF sign, and
+    // three south-facing "playing" band members (singer/guitarist/bassist).
+    this.load.image('band_stage', '/sprites/lobby/band_stage.png');
+    // The kick drum + riser front, cut from the stage, drawn ABOVE the drummer
+    // so his lower half sits behind the kit. Same canvas size as band_stage.
+    this.load.image('stage_drumkit', '/sprites/lobby/stage_drumkit.png');
+    this.load.image('crazy_sign', '/sprites/lobby/crazy_stuff_sign.png');
+    this.load.image('mic_stand', '/sprites/lobby/mic_stand.png');
+    for (const m of ['singer', 'guitarist', 'bassist', 'drummer']) {
+      this.load.spritesheet(`band_${m}`, `/sprites/lobby/band_${m}.png`, { frameWidth: BAND_FRAME, frameHeight: BAND_FRAME });
+    }
     // Store storefront building.
     this.load.image('store_building', '/sprites/lobby/store_building.png');
     // Leaderboard billboard + race garage.
@@ -196,8 +210,8 @@ export class LobbyScene extends Phaser.Scene {
     this.createGachaMachine(this.gachaX, this.gachaY);
 
     // Gatchaman NPC — stands just to the right of the machine, hawking pulls.
-    this.gatchamanX = this.gachaX + 104;
-    this.gatchamanY = this.gachaY + 20;
+    this.gatchamanX = this.gachaX + 78;
+    this.gatchamanY = this.gachaY - 8;
     this.createGatchaman(this.gatchamanX, this.gatchamanY);
 
     // Top plaza: Store (left, a bit lower) + Leaderboard wall (right).
@@ -208,6 +222,10 @@ export class LobbyScene extends Phaser.Scene {
     this.boardX = width / 2 + 230;
     this.boardY = 120;
     this.drawLeaderboardWall(this.boardX, this.boardY);
+
+    // Rock band stage — the lobby centerpiece, lower-center so the neon sign
+    // overhead clears the top-plaza store/leaderboard.
+    this.createBandStage(width / 2, 400);
 
     // Register animations
     this.registerAnimations();
@@ -521,23 +539,24 @@ export class LobbyScene extends Phaser.Scene {
         repeat: -1,
       });
     }
-    // Scale his 128px frame down to match player avatars (92px @ 0.75 ≈ 69px).
+    // Scale his 128px frame down to roughly player size (a touch taller).
     this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
-      .setScale(0.55).setOrigin(0.5, 0.9).setDepth(7);
+      .setScale(0.66).setOrigin(0.5, 0.9).setDepth(7);
     this.gatchaman.play('gatchaman_idle');
     this.startGatchamanChatter();
   }
 
-  /** Cycle Gatchaman's barks: first one shortly after spawn, then every ~7s. */
+  /** Cycle Gatchaman's barks: a bubble shows for ~4s, then ~5s of silence
+   *  before the next one. Self-scheduling so the gap stays consistent. */
   private startGatchamanChatter(): void {
     let i = 0;
     const say = (): void => {
       if (!this.gatchaman?.active) return;
       this.showGatchamanBubble(GATCHAMAN_LINES[i % GATCHAMAN_LINES.length]);
       i++;
+      this.time.delayedCall(9300, say); // ~4.3s visible + ~5s gap
     };
     this.time.delayedCall(1800, say);
-    this.time.addEvent({ delay: 7000, loop: true, callback: say });
   }
 
   /** A wrapped speech bubble over Gatchaman's head that fades after a few sec. */
@@ -551,12 +570,195 @@ export class LobbyScene extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(50);
     this.gatchamanBubble = bubble;
     this.tweens.add({
-      targets: bubble, alpha: 0, duration: 800, delay: 4800,
+      targets: bubble, alpha: 0, duration: 800, delay: 3500,
       onComplete: () => {
         bubble.destroy();
         if (this.gatchamanBubble === bubble) this.gatchamanBubble = undefined;
       },
     });
+  }
+
+  /** Rock band stage centerpiece: the stage platform, a flashing neon
+   *  CRAZY STUFF sign mounted above it, and three headbanging band members.
+   *  Every asset is guarded so a not-yet-shipped sprite is simply skipped. */
+  private createBandStage(cx: number, cy: number): void {
+    let stageTopY = cy - 110;
+    // The stage platform (depth below the band + players).
+    if (this.textures.exists('band_stage')) {
+      const stage = this.add.image(cx, cy, 'band_stage')
+        .setOrigin(0.5, 0.5).setDepth(5);
+      stageTopY = stage.getTopCenter().y;
+    }
+
+    // Band members on the stage. Drummer first (back-center on the riser) so
+    // the front row (guitarist / singer / bassist) renders over him.
+    const members: Array<{ key: string; dx: number; dy: number }> = [
+      { key: 'band_drummer',   dx: 0,   dy: -38 },
+      { key: 'band_guitarist', dx: -50, dy: 30 },
+      { key: 'band_singer',    dx: 0,   dy: 40 },
+      { key: 'band_bassist',   dx: 50,  dy: 30 },
+    ];
+    for (const m of members) this.addBandMember(m.key, cx + m.dx, cy + m.dy);
+
+    // Kick drum + riser front, redrawn over the drummer (depth 6.5 > band 6) so
+    // his lower body is hidden behind the kit — he reads as seated at the drums.
+    if (this.textures.exists('stage_drumkit')) {
+      this.add.image(cx, cy, 'stage_drumkit').setOrigin(0.5, 0.5).setDepth(6.5);
+    }
+
+    // Mic stand in front of the singer — mic head at chest height so it reads
+    // as "in front of him" without covering his face.
+    if (this.textures.exists('mic_stand')) {
+      this.add.image(cx, cy + 66, 'mic_stand')
+        .setOrigin(0.5, 1).setScale(0.40).setDepth(6.6);
+    }
+
+    // Stage lighting + smoke FX (purely code; no art needed).
+    this.createStageFX(cx, cy, stageTopY);
+
+    // Neon CRAZY STUFF sign mounted above the stage, flashing like real neon.
+    if (this.textures.exists('crazy_sign')) {
+      const sign = this.add.image(cx, stageTopY - 14, 'crazy_sign')
+        .setOrigin(0.5, 1).setDepth(8);
+      // Scale the sign to mount above the stage (about half the stage width).
+      const target = 150 / sign.width;
+      sign.setScale(target);
+
+      // Metal truss rig so the sign reads as mounted, not floating: a top beam
+      // it hangs from, plus two legs running down onto the stage. Behind the
+      // band (depth 5.5) and behind the sign (8).
+      const b = sign.getBounds();
+      const beamY = b.y - 7;
+      const legBot = stageTopY + 18;
+      const lX = b.x + 18, rX = b.right - 18;
+      const truss = this.add.graphics().setDepth(5.5);
+      this.drawTrussSegment(truss, b.x - 12, beamY, b.right + 12, beamY); // top beam
+      this.drawTrussSegment(truss, lX, beamY, lX, legBot);                // left leg
+      this.drawTrussSegment(truss, rX, beamY, rX, legBot);                // right leg
+      truss.fillStyle(0x3a3d45, 1);                                       // base feet
+      truss.fillRect(lX - 8, legBot - 2, 16, 4);
+      truss.fillRect(rX - 8, legBot - 2, 16, 4);
+      sign.setBlendMode(Phaser.BlendModes.NORMAL);
+      // Gentle neon glow pulse...
+      this.tweens.add({
+        targets: sign, alpha: { from: 1, to: 0.86 },
+        duration: 520, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      });
+      // ...with an occasional sharp "buzz" flicker.
+      this.tweens.add({
+        targets: sign, alpha: 0.5, duration: 70, yoyo: true,
+        repeat: -1, repeatDelay: 3200, ease: 'Quad.easeIn',
+      });
+    }
+  }
+
+  /** Add one band member sprite playing its looping "play" animation. */
+  private addBandMember(texKey: string, x: number, y: number): void {
+    if (!this.textures.exists(texKey)) return; // sprite not shipped yet
+    const animKey = `${texKey}_play`;
+    if (!this.anims.exists(animKey)) {
+      const frameCount = this.textures.get(texKey).frameTotal - 1; // minus __BASE
+      this.anims.create({
+        key: animKey,
+        frames: this.anims.generateFrameNumbers(texKey, { start: 0, end: Math.max(0, frameCount - 1) }),
+        frameRate: 8,
+        repeat: -1,
+      });
+    }
+    // Match the player avatars' dimensions (92px frame @ 0.75, feet origin).
+    this.add.sprite(x, y, texKey)
+      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(6)
+      .play(animKey);
+  }
+
+  /** Draw one metal truss segment (two rails + X cross-bracing) between two
+   *  points. Works at any orientation — used for the sign rig's beam and legs. */
+  private drawTrussSegment(g: Phaser.GameObjects.Graphics, ax: number, ay: number, bx: number, by: number): void {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len, py = dx / len; // unit perpendicular
+    const off = 3.5;                     // rail half-separation
+    // Two parallel rails.
+    g.lineStyle(2, 0x9aa0ad, 1);
+    g.lineBetween(ax + px * off, ay + py * off, bx + px * off, by + py * off);
+    g.lineBetween(ax - px * off, ay - py * off, bx - px * off, by - py * off);
+    // X cross-braces along the run.
+    g.lineStyle(1.5, 0x565b66, 1);
+    const n = Math.max(1, Math.round(len / 13));
+    for (let i = 0; i < n; i++) {
+      const t0 = i / n, t1 = (i + 1) / n;
+      const x0 = ax + dx * t0, y0 = ay + dy * t0, x1 = ax + dx * t1, y1 = ay + dy * t1;
+      g.lineBetween(x0 + px * off, y0 + py * off, x1 - px * off, y1 - py * off);
+      g.lineBetween(x0 - px * off, y0 - py * off, x1 + px * off, y1 + py * off);
+    }
+  }
+
+  /** Concert lighting + atmosphere over the stage: sweeping moving-head
+   *  spotlight beams and drifting smoke-machine haze. All procedural — no art. */
+  private createStageFX(cx: number, cy: number, stageTopY: number): void {
+    // Soft round puff texture for smoke (radial white → transparent).
+    if (!this.textures.exists('fx_smoke')) {
+      const g = this.make.graphics({ x: 0, y: 0 });
+      const r = 32;
+      for (let i = r; i > 0; i--) {
+        g.fillStyle(0xffffff, 0.06);
+        g.fillCircle(r, r, i);
+      }
+      g.generateTexture('fx_smoke', r * 2, r * 2);
+      g.destroy();
+    }
+    // Beam texture: a triangle, apex at top (the light source), widening down.
+    if (!this.textures.exists('fx_beam')) {
+      const w = 130, h = 230;
+      const g = this.make.graphics({ x: 0, y: 0 });
+      g.fillStyle(0xffffff, 1);
+      g.beginPath();
+      g.moveTo(w / 2, 0);
+      g.lineTo(w * 0.04, h);
+      g.lineTo(w * 0.96, h);
+      g.closePath();
+      g.fillPath();
+      g.generateTexture('fx_beam', w, h);
+      g.destroy();
+    }
+
+    // Moving-head spotlights: colored beams from above the stage that sweep
+    // side to side, each on its own phase, glowing via additive blending.
+    const beamSrcY = stageTopY + 8;
+    const beams = [
+      { color: 0xff3df0, dx: -78, phase: 0 },
+      { color: 0x3df0ff, dx: 0,   phase: 850 },
+      { color: 0xffe23d, dx: 78,  phase: 1700 },
+    ];
+    for (const b of beams) {
+      const beam = this.add.image(cx + b.dx, beamSrcY, 'fx_beam')
+        .setOrigin(0.5, 0).setDepth(6.5)
+        .setTint(b.color).setAlpha(0.16)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: beam, angle: { from: -16, to: 16 },
+        duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: b.phase,
+      });
+      this.tweens.add({
+        targets: beam, alpha: { from: 0.10, to: 0.24 },
+        duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: b.phase,
+      });
+    }
+
+    // Smoke machine: pale haze billowing up from the front corners of the
+    // stage, drifting through the band. Near-white so it reads against both the
+    // dark stage and the grey wall, and catches the colored beams.
+    for (const sx of [cx - 96, cx + 96]) {
+      this.add.particles(sx, cy + 36, 'fx_smoke', {
+        speedY: { min: -24, max: -46 },
+        speedX: { min: -12, max: 12 },
+        scale: { start: 0.6, end: 2.8 },
+        alpha: { start: 0.6, end: 0 },
+        lifespan: 3600,
+        frequency: 300,
+        tint: 0xf2f5fb,
+      }).setDepth(7);
+    }
   }
 
   /** Draw a standing notice board for the seasonal leaderboard (#23).
