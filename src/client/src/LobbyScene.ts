@@ -62,6 +62,16 @@ const GATCHAMAN_LINES = [
 // Square frame size of the band-member spritesheets (PixelLab standard 64px → 92 canvas).
 const BAND_FRAME = 92;
 
+// Depth bands for Y-sorting. Ground-standing entities (players, NPCs, buildings,
+// band, tall props, the sign rig) use their feet-Y directly as depth so whoever
+// is lower on screen draws in front. Flat floors sit behind; atmosphere + UI on top.
+const D_GROUND = -10000;      // lobby ground image
+const D_STAGE_FLOOR = -9000;  // band-stage platform (walked on)
+const D_FX = 20000;           // spotlight beams + smoke (atmosphere over the scene)
+const D_LABEL = 30000;        // name labels
+const D_BUBBLE = 31000;       // speech bubbles
+const D_PROMPT = 32000;       // [E] prompts / hints
+
 export class LobbyScene extends Phaser.Scene {
   private authState: AuthState | null = null;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
@@ -185,7 +195,7 @@ export class LobbyScene extends Phaser.Scene {
     // sized to the game canvas. Buildings + player render on top.
     const cy = height / 2;
 
-    this.add.image(0, 0, 'lobby_map').setOrigin(0, 0).setDepth(-3);
+    this.add.image(0, 0, 'lobby_map').setOrigin(0, 0).setDepth(D_GROUND);
 
     this.groundBounds = {
       left: 40,
@@ -236,14 +246,14 @@ export class LobbyScene extends Phaser.Scene {
     this.player = this.add.sprite(this.playerX, this.playerY, `${this.charKey}_south-east`)
       .setScale(0.75)
       .setOrigin(0.5, 0.85)
-      .setDepth(10);
+      .setDepth(this.playerY);
     this.player.play(`${this.charKey}_idle_SD`);
 
     // Player name label
     const myName = this.authState?.username ?? 'Player';
     this.playerLabel = this.add.text(this.playerX, this.playerY - 55, myName, {
       fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
-    }).setOrigin(0.5, 1).setDepth(11);
+    }).setOrigin(0.5, 1).setDepth(D_LABEL);
 
     // Connect to multiplayer lobby for presence
     this.connectLobby().then(() => {
@@ -261,7 +271,7 @@ export class LobbyScene extends Phaser.Scene {
       color: '#ffdd44',
       backgroundColor: '#000000aa',
       padding: { x: 8, y: 4 },
-    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+    }).setOrigin(0.5, 1).setDepth(D_PROMPT).setAlpha(0);
 
     this.tweens.add({
       targets: this.ePrompt,
@@ -279,7 +289,7 @@ export class LobbyScene extends Phaser.Scene {
       color: '#ffdd44',
       backgroundColor: '#000000aa',
       padding: { x: 8, y: 4 },
-    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+    }).setOrigin(0.5, 1).setDepth(D_PROMPT).setAlpha(0);
 
     this.tweens.add({
       targets: this.gachaPrompt,
@@ -297,7 +307,7 @@ export class LobbyScene extends Phaser.Scene {
       color: '#ffdd44',
       backgroundColor: '#000000aa',
       padding: { x: 8, y: 4 },
-    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+    }).setOrigin(0.5, 1).setDepth(D_PROMPT).setAlpha(0);
 
     this.tweens.add({
       targets: this.boardPrompt,
@@ -315,7 +325,7 @@ export class LobbyScene extends Phaser.Scene {
       color: '#ffdd44',
       backgroundColor: '#000000aa',
       padding: { x: 8, y: 4 },
-    }).setOrigin(0.5, 1).setDepth(20).setAlpha(0);
+    }).setOrigin(0.5, 1).setDepth(D_PROMPT).setAlpha(0);
 
     this.tweens.add({
       targets: this.shopPrompt,
@@ -359,7 +369,7 @@ export class LobbyScene extends Phaser.Scene {
     // WASD hint
     this.add.text(10, height - 30, 'WASD move · E interact · P profile · I inventory · Enter chat', {
       fontSize: '12px', fontFamily: 'monospace', color: '#555',
-    }).setScrollFactor(0).setDepth(100);
+    }).setScrollFactor(0).setDepth(D_PROMPT);
 
     // Chat box (always visible)
     this.createChatBox();
@@ -416,11 +426,13 @@ export class LobbyScene extends Phaser.Scene {
       this.player.setFlipX(PIXELLAB_DIR_MAP[this.playerFacing].flipX);
     }
 
+    // Y-sort the player by feet so they walk in front of / behind everything.
+    this.player.setDepth(this.playerY);
     // Update name label + speech bubble position
     this.playerLabel.setPosition(this.playerX, this.playerY - 55);
     this.localBubble?.setPosition(this.playerX, this.playerY - 70);
-    // Keep our equipment layers glued to the body.
-    this.syncEquip(this.myEquip, this.playerX, this.playerY, this.playerFacing, moving, 10, this.player);
+    // Keep our equipment layers glued to the body (Y-sorted with it).
+    this.syncEquip(this.myEquip, this.playerX, this.playerY, this.playerFacing, moving, this.playerY, this.player);
 
     // Send position to lobby room — always send on movement state change
     if (this.lobbyRoom) {
@@ -438,9 +450,10 @@ export class LobbyScene extends Phaser.Scene {
     for (const other of this.otherPlayers.values()) {
       other.sprite.x += (other.targetX - other.sprite.x) * 0.15;
       other.sprite.y += (other.targetY - other.sprite.y) * 0.15;
+      other.sprite.setDepth(other.sprite.y); // Y-sort
       other.label.setPosition(other.sprite.x, other.sprite.y - 55);
       other.bubble?.setPosition(other.sprite.x, other.sprite.y - 70);
-      this.syncEquip(other.equip, other.sprite.x, other.sprite.y, other.facing, other.moving, 9, other.sprite);
+      this.syncEquip(other.equip, other.sprite.x, other.sprite.y, other.facing, other.moving, other.sprite.y, other.sprite);
     }
 
     // E prompts (race building + gacha machine)
@@ -469,11 +482,11 @@ export class LobbyScene extends Phaser.Scene {
   /** The Crazy Race entrance — a garage building you walk into to race. */
   private drawBuilding(bx: number, by: number): void {
     const b = this.add.image(bx, by + 55, 'race_building')
-      .setOrigin(0.5, 1).setScale(0.62).setDepth(6);
+      .setOrigin(0.5, 1).setScale(0.62).setDepth(by + 55);
     // Vivid red+yellow glowing neon 'CRAZY RACE' sign.
     const sign = this.add.text(bx, b.getTopCenter().y - 6, 'CRAZY RACE', {
       fontSize: '16px', fontFamily: 'monospace', fontStyle: 'bold',
-    }).setOrigin(0.5, 1).setDepth(7);
+    }).setOrigin(0.5, 1).setDepth(by + 55.1);
     const grad = sign.context.createLinearGradient(0, 0, 0, sign.height);
     grad.addColorStop(0, '#fff27a');   // hot yellow core (top)
     grad.addColorStop(0.5, '#ffc400'); // amber
@@ -501,7 +514,7 @@ export class LobbyScene extends Phaser.Scene {
       });
     }
     const machine = this.add.sprite(gx, gy + 12, 'gacha_machine')
-      .setOrigin(0.5, 1).setDepth(6);
+      .setOrigin(0.5, 1).setDepth(gy + 12);
     machine.play('gacha_idle');
 
     // Green antenna flash — a glowing dot at the antenna tip that pulses, then
@@ -509,7 +522,7 @@ export class LobbyScene extends Phaser.Scene {
     const fw = machine.width, fh = machine.height; // frame 97x120
     const tipX = gx + (80 - fw / 2);            // antenna tip ~x80 in the frame
     const tipY = (gy + 12) - fh + 1;            // ~y1 (top), bottom-origin
-    const glow = this.add.circle(tipX, tipY, 4, 0x66ff66, 1).setDepth(7);
+    const glow = this.add.circle(tipX, tipY, 4, 0x66ff66, 1).setDepth(gy + 12.1);
     glow.setBlendMode(Phaser.BlendModes.ADD);
     this.tweens.add({ targets: glow, alpha: 0.25, scale: 0.7, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     // periodic bright flash
@@ -522,7 +535,7 @@ export class LobbyScene extends Phaser.Scene {
     this.add.text(gx, gy - 114, 'GACHA', {
       fontSize: '12px', fontFamily: 'monospace', color: '#9fe6ff', fontStyle: 'bold',
       stroke: '#001018', strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(7);
+    }).setOrigin(0.5, 1).setDepth(gy + 12.1);
   }
 
   /** Gatchaman — the cyborg cowboy drag queen NPC beside the gacha machine.
@@ -541,7 +554,7 @@ export class LobbyScene extends Phaser.Scene {
     }
     // Scale his 128px frame down to roughly player size (a touch taller).
     this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
-      .setScale(0.66).setOrigin(0.5, 0.9).setDepth(7);
+      .setScale(0.66).setOrigin(0.5, 0.9).setDepth(gy);
     this.gatchaman.play('gatchaman_idle');
     this.startGatchamanChatter();
   }
@@ -567,7 +580,7 @@ export class LobbyScene extends Phaser.Scene {
       fontSize: '11px', fontFamily: 'monospace', color: '#ffe6ff',
       backgroundColor: '#1a001acc', padding: { x: 7, y: 4 },
       align: 'center', wordWrap: { width: 160 },
-    }).setOrigin(0.5, 1).setDepth(50);
+    }).setOrigin(0.5, 1).setDepth(D_BUBBLE);
     this.gatchamanBubble = bubble;
     this.tweens.add({
       targets: bubble, alpha: 0, duration: 800, delay: 3500,
@@ -586,7 +599,7 @@ export class LobbyScene extends Phaser.Scene {
     // The stage platform (depth below the band + players).
     if (this.textures.exists('band_stage')) {
       const stage = this.add.image(cx, cy, 'band_stage')
-        .setOrigin(0.5, 0.5).setDepth(5);
+        .setOrigin(0.5, 0.5).setDepth(D_STAGE_FLOOR);
       stageTopY = stage.getTopCenter().y;
     }
 
@@ -600,17 +613,17 @@ export class LobbyScene extends Phaser.Scene {
     ];
     for (const m of members) this.addBandMember(m.key, cx + m.dx, cy + m.dy);
 
-    // Kick drum + riser front, redrawn over the drummer (depth 6.5 > band 6) so
-    // his lower body is hidden behind the kit — he reads as seated at the drums.
+    // Kick drum + riser front, redrawn just in front of the drummer (his feet
+    // are at cy-38) so his lower body is hidden behind the kit.
     if (this.textures.exists('stage_drumkit')) {
-      this.add.image(cx, cy, 'stage_drumkit').setOrigin(0.5, 0.5).setDepth(6.5);
+      this.add.image(cx, cy, 'stage_drumkit').setOrigin(0.5, 0.5).setDepth(cy - 37.5);
     }
 
-    // Mic stand in front of the singer — mic head at chest height so it reads
-    // as "in front of him" without covering his face.
+    // Mic stand in front of the singer — its base (cy+66) is below the singer's
+    // feet (cy+40), so Y-sort puts it in front of him without covering his face.
     if (this.textures.exists('mic_stand')) {
       this.add.image(cx, cy + 66, 'mic_stand')
-        .setOrigin(0.5, 1).setScale(0.40).setDepth(6.6);
+        .setOrigin(0.5, 1).setScale(0.40).setDepth(cy + 66);
     }
 
     // Stage lighting + smoke FX (purely code; no art needed).
@@ -619,19 +632,21 @@ export class LobbyScene extends Phaser.Scene {
     // Neon CRAZY STUFF sign mounted above the stage, flashing like real neon.
     if (this.textures.exists('crazy_sign')) {
       const sign = this.add.image(cx, stageTopY - 14, 'crazy_sign')
-        .setOrigin(0.5, 1).setDepth(8);
+        .setOrigin(0.5, 1);
       // Scale the sign to mount above the stage (about half the stage width).
       const target = 150 / sign.width;
       sign.setScale(target);
 
       // Metal truss rig so the sign reads as mounted, not floating: a top beam
-      // it hangs from, plus two legs running down onto the stage. Behind the
-      // band (depth 5.5) and behind the sign (8).
+      // it hangs from, plus two legs running down onto the stage. The rig's feet
+      // (legBot) are at the back of the stage, so it Y-sorts as a tall structure
+      // there — players/band in front of it draw over it.
       const b = sign.getBounds();
       const beamY = b.y - 7;
       const legBot = stageTopY + 18;
       const lX = b.x + 18, rX = b.right - 18;
-      const truss = this.add.graphics().setDepth(5.5);
+      sign.setDepth(legBot - 0.5);
+      const truss = this.add.graphics().setDepth(legBot - 1);
       this.drawTrussSegment(truss, b.x - 12, beamY, b.right + 12, beamY); // top beam
       this.drawTrussSegment(truss, lX, beamY, lX, legBot);                // left leg
       this.drawTrussSegment(truss, rX, beamY, rX, legBot);                // right leg
@@ -665,9 +680,10 @@ export class LobbyScene extends Phaser.Scene {
         repeat: -1,
       });
     }
-    // Match the player avatars' dimensions (92px frame @ 0.75, feet origin).
+    // Match the player avatars' dimensions (92px frame @ 0.75, feet origin) and
+    // Y-sort by feet so players walk among the band correctly.
     this.add.sprite(x, y, texKey)
-      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(6)
+      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(y)
       .play(animKey);
   }
 
@@ -732,7 +748,7 @@ export class LobbyScene extends Phaser.Scene {
     ];
     for (const b of beams) {
       const beam = this.add.image(cx + b.dx, beamSrcY, 'fx_beam')
-        .setOrigin(0.5, 0).setDepth(6.5)
+        .setOrigin(0.5, 0).setDepth(D_FX)
         .setTint(b.color).setAlpha(0.16)
         .setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({
@@ -757,7 +773,7 @@ export class LobbyScene extends Phaser.Scene {
         lifespan: 3600,
         frequency: 300,
         tint: 0xf2f5fb,
-      }).setDepth(7);
+      }).setDepth(D_FX);
     }
   }
 
@@ -766,11 +782,11 @@ export class LobbyScene extends Phaser.Scene {
   /** Leaderboard billboard — a lit sign the player walks up to. */
   private drawLeaderboardWall(bx: number, by: number): void {
     const board = this.add.image(bx, by + 60, 'leaderboard_board')
-      .setOrigin(0.5, 1).setScale(1.6).setDepth(6);
+      .setOrigin(0.5, 1).setScale(1.6).setDepth(by + 60);
     this.add.text(bx, board.getTopCenter().y - 4, 'LEADERBOARD', {
       fontSize: '11px', fontFamily: 'monospace', color: '#ffe07a', fontStyle: 'bold',
       stroke: '#1a1408', strokeThickness: 4,
-    }).setOrigin(0.5, 1).setDepth(7);
+    }).setOrigin(0.5, 1).setDepth(by + 60.1);
   }
 
   // ─── Leaderboard (#23; walk-up board, top players by season XP) ─────────────
@@ -878,12 +894,12 @@ export class LobbyScene extends Phaser.Scene {
   /** The Store building (#25) — a storefront the player walks up to. */
   private drawCoinShop(sx: number, sy: number): void {
     const building = this.add.image(sx, sy + 40, 'store_building')
-      .setOrigin(0.5, 1).setScale(0.5).setDepth(6);
+      .setOrigin(0.5, 1).setScale(0.5).setDepth(sy + 40);
     // 'STORE' sign above the building.
     this.add.text(sx - 12, building.getTopCenter().y + 54, 'STORE', {
       fontSize: '13px', fontFamily: 'monospace', color: '#ffeebb', fontStyle: 'bold',
       stroke: '#1a0e08', strokeThickness: 4,
-    }).setOrigin(0.5, 1).setDepth(7);
+    }).setOrigin(0.5, 1).setDepth(sy + 40.1);
   }
 
   // ─── Coin Shop (#25; walk-up stall, monthly curated cosmetics for coins) ────
@@ -1225,7 +1241,7 @@ export class LobbyScene extends Phaser.Scene {
     const sig = this.equipSignature(this.myLoadout, this.charKey);
     if (sig === this.myEquipSig && (this.myEquip.size > 0 || Object.keys(this.myLoadout).length === 0)) return;
     this.ensureEquipLoaded(this.myLoadout, this.charKey, () => {
-      this.rebuildEquip(this.myEquip, this.myLoadout, this.charKey, 10);
+      this.rebuildEquip(this.myEquip, this.myLoadout, this.charKey, this.playerY);
       this.myEquipSig = this.equipSignature(this.myLoadout, this.charKey);
     });
   }
@@ -1267,10 +1283,10 @@ export class LobbyScene extends Phaser.Scene {
         let other = this.otherPlayers.get(p.sessionId);
         if (!other) {
           const sprite = this.add.sprite(p.x, p.y, `${charKey}_south-east`)
-            .setScale(0.75).setOrigin(0.5, 0.85).setDepth(9);
+            .setScale(0.75).setOrigin(0.5, 0.85).setDepth(p.y);
           const label = this.add.text(p.x, p.y - 55, p.playerName, {
             fontSize: '13px', fontFamily: 'monospace', color: '#ffffff', fontStyle: 'bold',
-          }).setOrigin(0.5, 1).setDepth(9);
+          }).setOrigin(0.5, 1).setDepth(D_LABEL);
           other = {
             sprite, label, targetX: p.x, targetY: p.y,
             charKey, facing, moving: !!p.moving, loadout, equip: new Map(), equipSig: '',
@@ -1301,7 +1317,7 @@ export class LobbyScene extends Phaser.Scene {
         if (sig !== other.equipSig) {
           const o = other;
           this.ensureEquipLoaded(loadout, charKey, () => {
-            this.rebuildEquip(o.equip, o.loadout, o.charKey, 9);
+            this.rebuildEquip(o.equip, o.loadout, o.charKey, o.sprite.y);
             o.equipSig = this.equipSignature(o.loadout, o.charKey);
           });
         }
@@ -1995,7 +2011,7 @@ export class LobbyScene extends Phaser.Scene {
       color: '#ffffff',
       backgroundColor: '#000000cc',
       padding: { x: 6, y: 3 },
-    }).setOrigin(0.5, 1).setDepth(50);
+    }).setOrigin(0.5, 1).setDepth(D_BUBBLE);
 
     // Store reference so update() can track position
     if (isLocal) {
