@@ -79,6 +79,20 @@ const GATCHAMAN_LINES = [
   'Just roll it, Motherf...!',
 ];
 
+// Melvin — the Crazy Race host by the garage door.
+const MELVIN_LINES = [
+  'Join the CRAZY RACE, Bro!',
+  'This race is only for the craziest! NO cap!',
+  'Here you can win some coins and get yourself some drip.',
+];
+
+// The drunk/stoner clown loitering left of the store with his balloons.
+const CLOWN_LINES = [
+  'Wanna buy some stuff?',
+  '[Burp!]',
+  'F... you!',
+];
+
 // Square frame size of the band-member spritesheets (PixelLab standard 64px → 92 canvas).
 const BAND_FRAME = 92;
 
@@ -143,6 +157,10 @@ export class LobbyScene extends Phaser.Scene {
   private gatchamanY = 0;
   private gatchaman?: Phaser.GameObjects.Sprite;
   private gatchamanBubble?: Phaser.GameObjects.Text;
+  /** Active bark bubbles for the generic chatter system, keyed by NPC id. */
+  private chatBubbles = new Map<string, Phaser.GameObjects.Text>();
+  private melvin?: Phaser.GameObjects.Sprite;
+  private clown?: Phaser.GameObjects.Sprite;
 
   private boardX = 0;
   private boardY = 0;
@@ -221,6 +239,7 @@ export class LobbyScene extends Phaser.Scene {
     this.load.spritesheet('gatchaman_idle', '/sprites/lobby/gatchaman_idle.png', { frameWidth: GATCHAMAN_FRAME, frameHeight: GATCHAMAN_FRAME });
     // Melvin — the Crazy Race host (standard PixelLab char, 92px frames).
     this.load.spritesheet('melvin_idle', '/sprites/lobby/melvin_idle.png', { frameWidth: 92, frameHeight: 92 });
+    this.load.spritesheet('clown_idle', '/sprites/lobby/clown_idle.png', { frameWidth: 92, frameHeight: 92 });
     // Rock band stage centerpiece: stage platform, neon CRAZY STUFF sign, and
     // three south-facing "playing" band members (singer/guitarist/bassist).
     this.load.image('band_stage', '/sprites/lobby/band_stage.png');
@@ -306,6 +325,8 @@ export class LobbyScene extends Phaser.Scene {
     this.shopX = 352;
     this.shopY = 400;
     this.drawCoinShop(this.shopX, this.shopY);
+    // Drunk clown loiters in the gap between the store's left wall and the fence.
+    this.createClown(282, 460);
 
     // Leaderboard (right).
     this.boardX = 1155;
@@ -694,10 +715,65 @@ export class LobbyScene extends Phaser.Scene {
         frameRate: 5, repeat: -1,
       });
     }
-    this.add.sprite(x, y, 'melvin_idle')
-      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(y)
-      .play('melvin_idle');
+    this.melvin = this.add.sprite(x, y, 'melvin_idle')
+      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(y);
+    this.melvin.play('melvin_idle');
     this.addNpcName('Melvin', x, y - 60);
+    this.startNpcChatter('melvin', x, y - 72, MELVIN_LINES, '#bff4ff', '#02141acc',
+      () => !!this.melvin?.active);
+  }
+
+  /** The drunk/stoner clown loitering left of the store, hawking balloons. */
+  private createClown(x: number, y: number): void {
+    if (!this.textures.exists('clown_idle')) return; // sprite not shipped yet
+    if (!this.anims.exists('clown_idle')) {
+      const frameCount = this.textures.get('clown_idle').frameTotal - 1;
+      this.anims.create({
+        key: 'clown_idle',
+        frames: this.anims.generateFrameNumbers('clown_idle', { start: 0, end: Math.max(0, frameCount - 1) }),
+        frameRate: 4, repeat: -1,
+      });
+    }
+    this.clown = this.add.sprite(x, y, 'clown_idle')
+      .setScale(0.75).setOrigin(0.5, 0.9).setDepth(y);
+    this.clown.play('clown_idle');
+    this.addNpcName('The Clown', x, y - 62);
+    this.startNpcChatter('clown', x, y - 74, CLOWN_LINES, '#ffd2f4', '#1a0014cc',
+      () => !!this.clown?.active);
+  }
+
+  /** Generic self-scheduling bark cycler for an idle NPC. Desynced from the
+   *  others via a random start delay + per-cycle jitter so bubbles never line up. */
+  private startNpcChatter(
+    id: string, ax: number, ay: number, lines: string[],
+    color: string, bg: string, isAlive: () => boolean,
+  ): void {
+    let i = Phaser.Math.Between(0, lines.length - 1); // random first line
+    const say = (): void => {
+      if (!isAlive()) return;
+      this.showNpcBubble(id, ax, ay, lines[i % lines.length], color, bg);
+      i++;
+      this.time.delayedCall(8500 + Phaser.Math.Between(0, 3500), say);
+    };
+    this.time.delayedCall(1200 + Phaser.Math.Between(0, 6000), say);
+  }
+
+  /** A wrapped speech bubble over a chattering NPC, fades after a few seconds. */
+  private showNpcBubble(id: string, x: number, y: number, text: string, color: string, bg: string): void {
+    this.chatBubbles.get(id)?.destroy();
+    const bubble = this.add.text(x, y, text, {
+      fontSize: '11px', fontFamily: 'monospace', color,
+      backgroundColor: bg, padding: { x: 7, y: 4 },
+      align: 'center', wordWrap: { width: 160 },
+    }).setOrigin(0.5, 1).setDepth(D_BUBBLE);
+    this.chatBubbles.set(id, bubble);
+    this.tweens.add({
+      targets: bubble, alpha: 0, duration: 800, delay: 3500,
+      onComplete: () => {
+        bubble.destroy();
+        if (this.chatBubbles.get(id) === bubble) this.chatBubbles.delete(id);
+      },
+    });
   }
 
   /** Cycle Gatchaman's barks: a bubble shows for ~4s, then ~5s of silence
