@@ -72,6 +72,29 @@ const D_LABEL = 30000;        // name labels
 const D_BUBBLE = 31000;       // speech bubbles
 const D_PROMPT = 32000;       // [E] prompts / hints
 
+// Subtle cool-dark multiply tint so the bright pixel buildings settle into the
+// moody painted map instead of popping out.
+const BUILDING_TINT = 0xaab0c2;
+
+// Depth for buildings that must ALWAYS render behind player avatars (below the
+// minimum walkable player Y, ~300). Their labels sit just above.
+const BEHIND_PLAYERS = 200;
+
+// Walkable arena floor polygon (marked in the ?edit layout editor). The player's
+// feet are kept inside this shape.
+const LOBBY_WALKABLE: Array<[number, number]> = [
+  [8,516],[147,580],[161,573],[86,481],[96,478],[95,467],[107,458],[107,449],[130,432],
+  [166,424],[234,390],[257,390],[328,429],[418,386],[435,376],[428,358],[428,342],[442,346],
+  [494,329],[498,313],[510,312],[509,337],[510,343],[615,343],[616,355],[674,358],[676,342],
+  [782,340],[783,311],[853,332],[848,371],[833,366],[820,381],[816,396],[818,401],[844,407],
+  [858,404],[910,415],[917,424],[934,426],[948,423],[1020,390],[1066,414],[1100,410],[1174,449],
+  [1269,480],[1277,479],[1274,503],[1259,512],[1242,508],[1227,513],[1216,517],[1204,517],
+  [1191,530],[1186,543],[1192,550],[1201,552],[1208,564],[1226,570],[1235,564],[1248,570],
+  [1255,582],[1262,592],[1270,596],[1275,600],[1276,643],[1225,657],[1119,593],[1106,581],
+  [1090,573],[1070,587],[1053,598],[1057,610],[1108,644],[1094,653],[965,716],[944,712],
+  [956,704],[964,687],[929,667],[919,658],[851,710],[847,717],[151,714],[103,687],
+];
+
 export class LobbyScene extends Phaser.Scene {
   private authState: AuthState | null = null;
   private bgMusic: Phaser.Sound.BaseSound | null = null;
@@ -138,6 +161,19 @@ export class LobbyScene extends Phaser.Scene {
   private lastSentY = 0;
   private lastSentMoving = false;
 
+  // Tight collision: each solid obstacle's silhouette is rasterised into a
+  // bitmap; the player's feet are blocked from entering any solid pixel.
+  private solids: Phaser.GameObjects.Image[] = [];
+  private collision: Uint8Array | null = null;
+  private collisionW = 0;
+  private collisionH = 0;
+
+  // In-lobby layout editor (?lobby&edit) — drag/rotate/mirror buildings, mark
+  // the walkable polygon + collision rects, export the layout JSON.
+  private editMode = false;
+  private bandStageParts: Phaser.GameObjects.GameObject[] = [];
+  private editorPanel: HTMLDivElement | null = null;
+
   constructor() {
     super({ key: 'LobbyScene' });
   }
@@ -174,6 +210,11 @@ export class LobbyScene extends Phaser.Scene {
     // Leaderboard billboard + race garage.
     this.load.image('leaderboard_board', '/sprites/lobby/leaderboard_board.png');
     this.load.image('race_building', '/sprites/lobby/race_building.png');
+    // Iso cyberpunk buildings (match the painted map), used in place of the
+    // legacy placeholders above when present.
+    this.load.image('race_garage', '/sprites/lobby/race_garage.png');
+    this.load.image('store_iso', '/sprites/lobby/store_iso.png');
+    this.load.image('leaderboard_iso', '/sprites/lobby/leaderboard_iso.png');
 
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
@@ -195,13 +236,16 @@ export class LobbyScene extends Phaser.Scene {
     // sized to the game canvas. Buildings + player render on top.
     const cy = height / 2;
 
+    // The whole environment is one cohesive isometric scene (iso floor, walls,
+    // neon skyline, debris, haze — all baked). Interactive objects sit on top.
     this.add.image(0, 0, 'lobby_map').setOrigin(0, 0).setDepth(D_GROUND);
 
+    // Walkable = the central arena floor of the map (inside the perimeter).
     this.groundBounds = {
-      left: 40,
-      right: width - 40,
-      top: 40,
-      bottom: height - 40,
+      left: 235,
+      right: width - 225,
+      top: 280,
+      bottom: height - 95,
     };
 
     // Reduce music volume when entering lobby
@@ -209,40 +253,46 @@ export class LobbyScene extends Phaser.Scene {
       try { (this.bgMusic as any).setVolume(0.15); } catch { /* ignore */ }
     }
 
-    // Building on the right
-    this.buildingX = width - 220;
-    this.buildingY = cy;
+    // Layout positions exported from the in-lobby editor (?lobby&edit).
+    // Crazy Race garage (right).
+    this.buildingX = 913;
+    this.buildingY = 369;
     this.drawBuilding(this.buildingX, this.buildingY);
 
-    // Gacha machine on the left (animated industrial reactor)
-    this.gachaX = 160;
-    this.gachaY = cy;
+    // Gacha machine (lower-left).
+    this.gachaX = 467;
+    this.gachaY = 593;
     this.createGachaMachine(this.gachaX, this.gachaY);
 
-    // Gatchaman NPC — stands just to the right of the machine, hawking pulls.
-    this.gatchamanX = this.gachaX + 78;
-    this.gatchamanY = this.gachaY - 8;
+    // Gatchaman NPC (placed independently).
+    this.gatchamanX = 537;
+    this.gatchamanY = 583;
     this.createGatchaman(this.gatchamanX, this.gatchamanY);
 
-    // Top plaza: Store (left, a bit lower) + Leaderboard wall (right).
-    this.shopX = width / 2 - 230;
-    this.shopY = 180;
+    // Store (left).
+    this.shopX = 352;
+    this.shopY = 400;
     this.drawCoinShop(this.shopX, this.shopY);
 
-    this.boardX = width / 2 + 230;
-    this.boardY = 120;
+    // Leaderboard (right).
+    this.boardX = 1155;
+    this.boardY = 410;
     this.drawLeaderboardWall(this.boardX, this.boardY);
 
-    // Rock band stage — the lobby centerpiece, lower-center so the neon sign
-    // overhead clears the top-plaza store/leaderboard.
-    this.createBandStage(width / 2, 400);
+    // Rock band stage — back-center of the arena.
+    this.createBandStage(647, 266);
+
+    // (Debris/props are baked into the scene image now.)
+
+    // Build the tight collision bitmap from every solid obstacle just placed.
+    this.buildCollisionMask(width, height);
 
     // Register animations
     this.registerAnimations();
 
-    // Player
-    this.playerX = width / 3;
-    this.playerY = height / 2;
+    // Player — spawn on the open arena floor (inside the walkable polygon).
+    this.playerX = 650;
+    this.playerY = 540;
     this.player = this.add.sprite(this.playerX, this.playerY, `${this.charKey}_south-east`)
       .setScale(0.75)
       .setOrigin(0.5, 0.85)
@@ -379,12 +429,19 @@ export class LobbyScene extends Phaser.Scene {
     if (authId) this.loadEquippedChar(authId).catch(() => {});
     this.createProfileButton();
 
+    // Layout editor (?edit): drag/rotate/mirror buildings, mark areas, export.
+    if (new URLSearchParams(window.location.search).has('edit')) {
+      this.editMode = true;
+      this.setupEditor();
+    }
+
     // Cleanup
     this.events.on('shutdown', () => this.cleanupScene());
     this.events.on('destroy', () => this.cleanupScene());
   }
 
   update(_time: number, delta: number): void {
+    if (this.editMode) return; // editor drives objects directly; no player sim
     const speed = MOVE_SPEED * (delta / 1000);
 
     const w = this.keys.W.isDown;
@@ -407,8 +464,12 @@ export class LobbyScene extends Phaser.Scene {
         dy *= norm;
       }
 
-      this.playerX = Phaser.Math.Clamp(this.playerX + dx * speed, this.groundBounds.left, this.groundBounds.right);
-      this.playerY = Phaser.Math.Clamp(this.playerY + dy * speed, this.groundBounds.top, this.groundBounds.bottom);
+      const nx = this.playerX + dx * speed;
+      const ny = this.playerY + dy * speed;
+      // Axis-separated: only move if the feet stay inside the walkable polygon
+      // and out of any solid obstacle (so the player slides along edges).
+      if (this.inWalkable(nx, this.playerY) && !this.solidAt(nx, this.playerY)) this.playerX = nx;
+      if (this.inWalkable(this.playerX, ny) && !this.solidAt(this.playerX, ny)) this.playerY = ny;
       this.player.setPosition(this.playerX, this.playerY);
 
       const dir = this.resolveDir(w, a, s, d);
@@ -479,14 +540,19 @@ export class LobbyScene extends Phaser.Scene {
     return this.playerFacing;
   }
 
-  /** The Crazy Race entrance — a garage building you walk into to race. */
+  /** The Crazy Race entrance — a cyberpunk garage/hangar with a neon arch. */
   private drawBuilding(bx: number, by: number): void {
-    const b = this.add.image(bx, by + 55, 'race_building')
-      .setOrigin(0.5, 1).setScale(0.62).setDepth(by + 55);
+    const tex = this.textures.exists('race_garage') ? 'race_garage' : 'race_building';
+    const b = this.add.image(bx, by + 55, tex)
+      .setOrigin(0.5, 1).setScale(0.72).setDepth(BEHIND_PLAYERS)
+      .setFlipX(tex === 'race_garage') // entrance faces left (toward the plaza)
+      .setTint(BUILDING_TINT);
+    b.setData('ename', 'race');
+    this.solids.push(b);
     // Vivid red+yellow glowing neon 'CRAZY RACE' sign.
     const sign = this.add.text(bx, b.getTopCenter().y - 6, 'CRAZY RACE', {
       fontSize: '16px', fontFamily: 'monospace', fontStyle: 'bold',
-    }).setOrigin(0.5, 1).setDepth(by + 55.1);
+    }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
     const grad = sign.context.createLinearGradient(0, 0, 0, sign.height);
     grad.addColorStop(0, '#fff27a');   // hot yellow core (top)
     grad.addColorStop(0.5, '#ffc400'); // amber
@@ -514,15 +580,17 @@ export class LobbyScene extends Phaser.Scene {
       });
     }
     const machine = this.add.sprite(gx, gy + 12, 'gacha_machine')
-      .setOrigin(0.5, 1).setDepth(gy + 12);
+      .setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS).setTint(BUILDING_TINT);
     machine.play('gacha_idle');
+    machine.setData('ename', 'gacha');
+    this.solids.push(machine);
 
     // Green antenna flash — a glowing dot at the antenna tip that pulses, then
     // blinks bright every few seconds (the "pull me" status light).
     const fw = machine.width, fh = machine.height; // frame 97x120
     const tipX = gx + (80 - fw / 2);            // antenna tip ~x80 in the frame
     const tipY = (gy + 12) - fh + 1;            // ~y1 (top), bottom-origin
-    const glow = this.add.circle(tipX, tipY, 4, 0x66ff66, 1).setDepth(gy + 12.1);
+    const glow = this.add.circle(tipX, tipY, 4, 0x66ff66, 1).setDepth(BEHIND_PLAYERS + 0.05);
     glow.setBlendMode(Phaser.BlendModes.ADD);
     this.tweens.add({ targets: glow, alpha: 0.25, scale: 0.7, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     // periodic bright flash
@@ -535,7 +603,7 @@ export class LobbyScene extends Phaser.Scene {
     this.add.text(gx, gy - 114, 'GACHA', {
       fontSize: '12px', fontFamily: 'monospace', color: '#9fe6ff', fontStyle: 'bold',
       stroke: '#001018', strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(gy + 12.1);
+    }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
   }
 
   /** Gatchaman — the cyborg cowboy drag queen NPC beside the gacha machine.
@@ -555,6 +623,7 @@ export class LobbyScene extends Phaser.Scene {
     // Scale his 128px frame down to roughly player size (a touch taller).
     this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
       .setScale(0.66).setOrigin(0.5, 0.9).setDepth(gy);
+    this.gatchaman.setData('ename', 'gatchaman');
     this.gatchaman.play('gatchaman_idle');
     this.startGatchamanChatter();
   }
@@ -591,16 +660,251 @@ export class LobbyScene extends Phaser.Scene {
     });
   }
 
+
+  /** Rasterise every solid obstacle's silhouette into a collision bitmap, at
+   *  its exact placed transform — so collision follows each asset's real shape. */
+  private buildCollisionMask(width: number, height: number): void {
+    const cv = document.createElement('canvas');
+    cv.width = width; cv.height = height;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    for (const obj of this.solids) {
+      const src = obj.texture.getSourceImage() as CanvasImageSource;
+      const fr = obj.frame;
+      const dw = fr.cutWidth * obj.scaleX;
+      const dh = fr.cutHeight * obj.scaleY;
+      const dx = obj.x - obj.originX * dw;
+      const dy = obj.y - obj.originY * dh;
+      try {
+        if (obj.flipX) {
+          ctx.save();
+          ctx.translate(dx + dw, dy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(src, fr.cutX, fr.cutY, fr.cutWidth, fr.cutHeight, 0, 0, dw, dh);
+          ctx.restore();
+        } else {
+          ctx.drawImage(src, fr.cutX, fr.cutY, fr.cutWidth, fr.cutHeight, dx, dy, dw, dh);
+        }
+      } catch { /* ignore a stray draw */ }
+    }
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const mask = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) {
+      if (data[i * 4 + 3] > 150) mask[i] = 1; // only near-opaque core = solid (ignores glow/shadow)
+    }
+    this.collision = mask; this.collisionW = width; this.collisionH = height;
+  }
+
+  /** True if the player's feet (a small span) would sit on a solid pixel. */
+  private solidAt(x: number, y: number): boolean {
+    if (!this.collision) return false;
+    const W = this.collisionW, H = this.collisionH;
+    const probes: Array<[number, number]> = [[x - 8, y + 6], [x, y + 6], [x + 8, y + 6]];
+    for (const [px, py] of probes) {
+      const ix = px | 0, iy = py | 0;
+      if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
+      if (this.collision[iy * W + ix]) return true;
+    }
+    return false;
+  }
+
+  /** True if the player's feet at (x,y) are inside the walkable arena polygon. */
+  private inWalkable(x: number, y: number): boolean {
+    const py = y + 8; // test the feet, not the sprite centre
+    const poly = LOBBY_WALKABLE;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if (((yi > py) !== (yj > py)) && x < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  // ─── Layout editor (?lobby&edit) ────────────────────────────────────────
+  /** Drag/rotate/mirror/scale the buildings, click out a walkable polygon and
+   *  collision rectangles, then export the whole layout as JSON to bake in. */
+  private setupEditor(): void {
+    type Img = Phaser.GameObjects.Image;
+    const items = ([...this.solids, this.gatchaman].filter(Boolean) as Img[]);
+    let mode: 'move' | 'walk' | 'collide' = 'move';
+    let selected: Img | null = null;
+    const walk: { x: number; y: number }[] = [];        // walkable polygon
+    const collPolys: { x: number; y: number }[][] = []; // finished collision shapes
+    let curColl: { x: number; y: number }[] = [];       // collision shape being drawn
+
+    const gfx = this.add.graphics().setDepth(D_PROMPT - 1);
+    const redraw = (): void => {
+      gfx.clear();
+      if (walk.length) {
+        gfx.fillStyle(0x33ff66, 0.12); gfx.lineStyle(2, 0x33ff66, 1);
+        gfx.beginPath(); gfx.moveTo(walk[0].x, walk[0].y);
+        for (let i = 1; i < walk.length; i++) gfx.lineTo(walk[i].x, walk[i].y);
+        gfx.closePath(); gfx.fillPath(); gfx.strokePath();
+        gfx.fillStyle(0x33ff66, 1);
+        for (const p of walk) gfx.fillCircle(p.x, p.y, 4);
+      }
+      const drawPoly = (pts: { x: number; y: number }[], closed: boolean): void => {
+        if (!pts.length) return;
+        gfx.beginPath(); gfx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) gfx.lineTo(pts[i].x, pts[i].y);
+        if (closed) { gfx.closePath(); gfx.fillPath(); }
+        gfx.strokePath();
+        for (const p of pts) gfx.fillCircle(p.x, p.y, 3);
+      };
+      gfx.fillStyle(0xff4488, 0.18); gfx.lineStyle(2, 0xff4488, 1);
+      for (const poly of collPolys) drawPoly(poly, true);
+      drawPoly(curColl, false);
+      if (selected) {
+        const b = selected.getBounds();
+        gfx.lineStyle(2, 0xffe000, 1); gfx.strokeRect(b.x, b.y, b.width, b.height);
+      }
+    };
+
+    for (const o of items) o.setInteractive({ draggable: true });
+
+    this.input.on('drag', (_p: Phaser.Input.Pointer, obj: Img, dx: number, dy: number) => {
+      if (mode !== 'move') return;
+      if (obj.getData('ename') === 'bandstage') {
+        const ddx = dx - obj.x, ddy = dy - obj.y;
+        for (const part of this.bandStageParts) {
+          const p = part as unknown as { x: number; y: number };
+          if (typeof p.x === 'number') { p.x += ddx; p.y += ddy; }
+        }
+      }
+      obj.x = Math.round(dx); obj.y = Math.round(dy);
+      if (obj.getData('ename') !== 'bandstage') obj.setDepth(obj.y);
+      selected = obj; this.updateEditorPanel(selected, mode); redraw();
+    });
+    this.input.on('gameobjectdown', (_p: Phaser.Input.Pointer, obj: Img) => {
+      if (mode === 'move') { selected = obj; this.updateEditorPanel(selected, mode); redraw(); }
+    });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      const pt = { x: Math.round(p.worldX), y: Math.round(p.worldY) };
+      if (mode === 'walk') { walk.push(pt); redraw(); }
+      else if (mode === 'collide') { curColl.push(pt); redraw(); }
+    });
+
+    this.input.keyboard!.on('keydown', (e: KeyboardEvent) => {
+      if (mode !== 'move' || !selected) return;
+      const o = selected; let used = true;
+      const k = e.key.toLowerCase();
+      if (k === 'f') o.toggleFlipX();
+      else if (k === '[') o.angle -= 5;
+      else if (k === ']') o.angle += 5;
+      else if (k === '+' || k === '=') o.setScale(o.scaleX * 1.05);
+      else if (k === '-' || k === '_') o.setScale(o.scaleX * 0.95);
+      else if (k === 'arrowup') { o.y -= 1; o.setDepth(o.y); }
+      else if (k === 'arrowdown') { o.y += 1; o.setDepth(o.y); }
+      else if (k === 'arrowleft') o.x -= 1;
+      else if (k === 'arrowright') o.x += 1;
+      else used = false;
+      if (used) { e.preventDefault(); this.updateEditorPanel(o, mode); redraw(); }
+    });
+
+    // Build the editor panel (DOM).
+    const panel = document.createElement('div');
+    panel.style.cssText = `position:fixed;top:8px;left:8px;width:250px;background:#0d0d18ee;
+      border:1px solid #4af;border-radius:6px;padding:10px;z-index:9500;font-family:monospace;
+      color:#cde;font-size:11px;line-height:1.5;`;
+    panel.addEventListener('keydown', (e) => e.stopPropagation());
+    panel.addEventListener('pointerdown', (e) => e.stopPropagation());
+    const setMode = (m: 'move' | 'walk' | 'collide'): void => { mode = m; this.updateEditorPanel(selected, mode); };
+    const exportLayout = (): void => {
+      const layout = {
+        buildings: items.map((o) => ({
+          name: o.getData('ename'), x: Math.round(o.x), y: Math.round(o.y),
+          scale: +o.scaleX.toFixed(3), angle: Math.round(o.angle), flipX: o.flipX,
+        })),
+        walkable: walk,
+        collision: curColl.length > 2 ? [...collPolys, curColl] : collPolys,
+      };
+      const json = JSON.stringify(layout, null, 2);
+      const ta = panel.querySelector('#ed-out') as HTMLTextAreaElement;
+      ta.value = json;
+      try { void navigator.clipboard.writeText(json); } catch { /* ignore */ }
+    };
+    panel.innerHTML = `
+      <div style="color:#4af;font-weight:bold;margin-bottom:4px;">LAYOUT EDITOR</div>
+      <div id="ed-info" style="color:#8fa;min-height:30px;"></div>
+      <div style="margin:6px 0;">Mode:
+        <button id="ed-move">Move</button>
+        <button id="ed-walk">Walkable</button>
+        <button id="ed-coll">Collision</button>
+      </div>
+      <div style="margin:6px 0;">Selected:
+        <button id="ed-flip">Flip</button>
+        <button id="ed-rotl">Rot&minus;</button>
+        <button id="ed-rotr">Rot+</button>
+        <button id="ed-big">Big+</button>
+        <button id="ed-small">Big&minus;</button>
+      </div>
+      <div style="color:#9ab;">Click a building, then use the buttons above.<br>
+        Drag to move · arrows nudge<br>
+        Walkable/Collision: click points to draw a free shape</div>
+      <div style="margin:6px 0;">
+        <button id="ed-close">Close shape</button>
+        <button id="ed-undo">Undo pt</button>
+        <button id="ed-clear">Clear marks</button>
+      </div>
+      <button id="ed-export" style="width:100%;padding:5px;background:#4af;color:#012;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">EXPORT (copies to clipboard)</button>
+      <textarea id="ed-out" style="width:100%;height:120px;margin-top:6px;background:#02030a;color:#7fd;border:1px solid #345;font-size:9px;" readonly></textarea>`;
+    document.body.appendChild(panel);
+    this.editorPanel = panel;
+    (panel.querySelector('#ed-move') as HTMLButtonElement).onclick = () => setMode('move');
+    (panel.querySelector('#ed-walk') as HTMLButtonElement).onclick = () => setMode('walk');
+    (panel.querySelector('#ed-coll') as HTMLButtonElement).onclick = () => setMode('collide');
+    // Transform the selected object via buttons (reliable even after the panel
+    // takes keyboard focus). The band stage flips/scales as a group.
+    const tf = (fn: (o: Img) => void): void => {
+      if (!selected) return;
+      fn(selected);
+      if (selected.getData('ename') !== 'bandstage') selected.setDepth(selected.y);
+      this.updateEditorPanel(selected, mode); redraw();
+    };
+    (panel.querySelector('#ed-flip') as HTMLButtonElement).onclick = () => tf((o) => o.toggleFlipX());
+    (panel.querySelector('#ed-rotl') as HTMLButtonElement).onclick = () => tf((o) => { o.angle -= 5; });
+    (panel.querySelector('#ed-rotr') as HTMLButtonElement).onclick = () => tf((o) => { o.angle += 5; });
+    (panel.querySelector('#ed-big') as HTMLButtonElement).onclick = () => tf((o) => o.setScale(o.scaleX * 1.05));
+    (panel.querySelector('#ed-small') as HTMLButtonElement).onclick = () => tf((o) => o.setScale(o.scaleX * 0.95));
+    (panel.querySelector('#ed-close') as HTMLButtonElement).onclick = () => {
+      if (curColl.length > 2) { collPolys.push(curColl); curColl = []; redraw(); }
+    };
+    (panel.querySelector('#ed-undo') as HTMLButtonElement).onclick = () => {
+      if (mode === 'walk') walk.pop();
+      else if (mode === 'collide') { if (curColl.length) curColl.pop(); else collPolys.pop(); }
+      redraw();
+    };
+    (panel.querySelector('#ed-clear') as HTMLButtonElement).onclick = () => {
+      walk.length = 0; collPolys.length = 0; curColl = []; redraw();
+    };
+    (panel.querySelector('#ed-export') as HTMLButtonElement).onclick = exportLayout;
+    this.updateEditorPanel(null, mode);
+  }
+
+  /** Refresh the editor panel's selected-object readout. */
+  private updateEditorPanel(sel: Phaser.GameObjects.Image | null, mode: string): void {
+    const info = this.editorPanel?.querySelector('#ed-info');
+    if (!info) return;
+    const m = `Mode: <b style="color:#4af">${mode}</b><br>`;
+    info.innerHTML = sel
+      ? `${m}<b>${sel.getData('ename')}</b><br>x:${Math.round(sel.x)} y:${Math.round(sel.y)} ` +
+        `scale:${sel.scaleX.toFixed(2)} angle:${Math.round(sel.angle)} flip:${sel.flipX}`
+      : `${m}<i>click a building to select</i>`;
+  }
+
   /** Rock band stage centerpiece: the stage platform, a flashing neon
    *  CRAZY STUFF sign mounted above it, and three headbanging band members.
    *  Every asset is guarded so a not-yet-shipped sprite is simply skipped. */
   private createBandStage(cx: number, cy: number): void {
+    const _partsStart = this.children.list.length; // capture stage parts for the editor
     let stageTopY = cy - 110;
     // The stage platform (depth below the band + players).
     if (this.textures.exists('band_stage')) {
       const stage = this.add.image(cx, cy, 'band_stage')
         .setOrigin(0.5, 0.5).setDepth(D_STAGE_FLOOR);
+      stage.setData('ename', 'bandstage');
       stageTopY = stage.getTopCenter().y;
+      this.solids.push(stage);
     }
 
     // Band members on the stage. Drummer first (back-center on the riser) so
@@ -665,6 +969,8 @@ export class LobbyScene extends Phaser.Scene {
         repeat: -1, repeatDelay: 3200, ease: 'Quad.easeIn',
       });
     }
+    // All objects added during this method = the stage group (for the editor).
+    this.bandStageParts = this.children.list.slice(_partsStart);
   }
 
   /** Add one band member sprite playing its looping "play" animation. */
@@ -781,12 +1087,19 @@ export class LobbyScene extends Phaser.Scene {
    *  Placeholder art until real pixel-art lands. */
   /** Leaderboard billboard — a lit sign the player walks up to. */
   private drawLeaderboardWall(bx: number, by: number): void {
-    const board = this.add.image(bx, by + 60, 'leaderboard_board')
-      .setOrigin(0.5, 1).setScale(1.6).setDepth(by + 60);
-    this.add.text(bx, board.getTopCenter().y - 4, 'LEADERBOARD', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#ffe07a', fontStyle: 'bold',
-      stroke: '#1a1408', strokeThickness: 4,
-    }).setOrigin(0.5, 1).setDepth(by + 60.1);
+    const tex = this.textures.exists('leaderboard_iso') ? 'leaderboard_iso' : 'leaderboard_board';
+    const scale = tex === 'leaderboard_iso' ? 0.85 : 1.6;
+    const board = this.add.image(bx, by + 60, tex)
+      .setOrigin(0.5, 1).setScale(scale).setDepth(BEHIND_PLAYERS).setTint(BUILDING_TINT);
+    board.setData('ename', 'leaderboard');
+    this.solids.push(board);
+    if (tex === 'leaderboard_board') {
+      // Legacy placeholder needs a label; the iso board has its own screen text.
+      this.add.text(bx, board.getTopCenter().y - 4, 'LEADERBOARD', {
+        fontSize: '11px', fontFamily: 'monospace', color: '#ffe07a', fontStyle: 'bold',
+        stroke: '#1a1408', strokeThickness: 4,
+      }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
+    }
   }
 
   // ─── Leaderboard (#23; walk-up board, top players by season XP) ─────────────
@@ -893,13 +1206,19 @@ export class LobbyScene extends Phaser.Scene {
 
   /** The Store building (#25) — a storefront the player walks up to. */
   private drawCoinShop(sx: number, sy: number): void {
-    const building = this.add.image(sx, sy + 40, 'store_building')
-      .setOrigin(0.5, 1).setScale(0.5).setDepth(sy + 40);
-    // 'STORE' sign above the building.
-    this.add.text(sx - 12, building.getTopCenter().y + 54, 'STORE', {
-      fontSize: '13px', fontFamily: 'monospace', color: '#ffeebb', fontStyle: 'bold',
-      stroke: '#1a0e08', strokeThickness: 4,
-    }).setOrigin(0.5, 1).setDepth(sy + 40.1);
+    const tex = this.textures.exists('store_iso') ? 'store_iso' : 'store_building';
+    const scale = tex === 'store_iso' ? 0.97 : 0.5;
+    const building = this.add.image(sx, sy + 40, tex)
+      .setOrigin(0.5, 1).setScale(scale).setDepth(BEHIND_PLAYERS).setTint(BUILDING_TINT);
+    building.setData('ename', 'store');
+    this.solids.push(building);
+    if (tex === 'store_building') {
+      // Legacy art needs a label; the iso store has its own neon SHOP sign.
+      this.add.text(sx - 12, building.getTopCenter().y + 54, 'STORE', {
+        fontSize: '13px', fontFamily: 'monospace', color: '#ffeebb', fontStyle: 'bold',
+        stroke: '#1a0e08', strokeThickness: 4,
+      }).setOrigin(0.5, 1).setDepth(sy + 40.1);
+    }
   }
 
   // ─── Coin Shop (#25; walk-up stall, monthly curated cosmetics for coins) ────
@@ -1487,6 +1806,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private cleanupScene(): void {
+    if (this.editorPanel) { this.editorPanel.remove(); this.editorPanel = null; }
     if (this.profilePanel) { this.profilePanel.remove(); this.profilePanel = null; }
     const hudBtns = document.getElementById('hud-buttons');
     if (hudBtns) hudBtns.remove();
