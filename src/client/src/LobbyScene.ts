@@ -29,6 +29,21 @@ interface OtherPlayer {
   equipSig: string;
 }
 
+// Ambient NPC (reuses the player avatar sprites/anims + equipment layers).
+interface WanderNpc {
+  sprite: Phaser.GameObjects.Sprite;
+  charKey: string;
+  facing: string;
+  tx: number;          // wander target
+  ty: number;
+  pauseUntil: number;  // scene-time ms to idle until before picking a new target
+  stuckMs: number;     // accumulates when barely moving → forces a retarget
+  moving: boolean;
+  isCrowd: boolean;    // crowd members stand still facing the stage
+  loadout: Record<string, string>;
+  equip: Map<string, Phaser.GameObjects.Sprite>;
+}
+
 const PL_CHAR_KEYS = ['male', 'female', 'male-medium', 'female-medium', 'male-dark', 'female-dark'];
 const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
 
@@ -48,6 +63,11 @@ const PIXELLAB_DIR_MAP: Record<string, { sheetSuffix: string; flipX: boolean }> 
 const MOVE_SPEED = 180;
 const DEFAULT_CHAR_KEY = 'male';
 const INTERACT_DIST = 100;
+
+// 8-direction key for a movement vector, by octant (screen space, +y down).
+const DIRS_BY_OCTANT = ['D', 'SD', 'S', 'SA', 'A', 'WA', 'W', 'WD'];
+const NPC_SPEED = 75;     // ambient wanderers amble slower than the player
+const NPC_COUNT = 6;
 
 // Gatchaman — the cyborg cowboy drag queen NPC who hawks the gacha machine.
 // Square frame size of the idle spritesheet (set from the PixelLab export).
@@ -79,6 +99,9 @@ const BUILDING_TINT = 0xaab0c2;
 // Depth for buildings that must ALWAYS render behind player avatars (below the
 // minimum walkable player Y, ~300). Their labels sit just above.
 const BEHIND_PLAYERS = 200;
+// Mounted building signs render ABOVE players (above any walkable Y) so players
+// pass behind them instead of walking over them like a carpet.
+const ABOVE_PLAYERS = 9000;
 
 // Walkable arena floor polygon (marked in the ?edit layout editor). The player's
 // feet are kept inside this shape.
@@ -173,6 +196,8 @@ export class LobbyScene extends Phaser.Scene {
   private editMode = false;
   private bandStageParts: Phaser.GameObjects.GameObject[] = [];
   private editorPanel: HTMLDivElement | null = null;
+  private npcs: WanderNpc[] = [];
+  private releasedBySlot: Record<string, string[]> | null = null;
 
   constructor() {
     super({ key: 'LobbyScene' });
@@ -194,6 +219,8 @@ export class LobbyScene extends Phaser.Scene {
     this.load.spritesheet('gacha_machine', '/sprites/lobby/gacha_machine.png', { frameWidth: 97, frameHeight: 120 });
     // Gatchaman NPC — cyborg cowboy drag queen, south-facing breathing idle.
     this.load.spritesheet('gatchaman_idle', '/sprites/lobby/gatchaman_idle.png', { frameWidth: GATCHAMAN_FRAME, frameHeight: GATCHAMAN_FRAME });
+    // Melvin — the Crazy Race host (standard PixelLab char, 92px frames).
+    this.load.spritesheet('melvin_idle', '/sprites/lobby/melvin_idle.png', { frameWidth: 92, frameHeight: 92 });
     // Rock band stage centerpiece: stage platform, neon CRAZY STUFF sign, and
     // three south-facing "playing" band members (singer/guitarist/bassist).
     this.load.image('band_stage', '/sprites/lobby/band_stage.png');
@@ -215,6 +242,10 @@ export class LobbyScene extends Phaser.Scene {
     this.load.image('race_garage', '/sprites/lobby/race_garage.png');
     this.load.image('store_iso', '/sprites/lobby/store_iso.png');
     this.load.image('leaderboard_iso', '/sprites/lobby/leaderboard_iso.png');
+    // Neon building signs (blend with the lobby's neon style).
+    this.load.image('gacha_sign', '/sprites/lobby/gacha_sign.png');
+    this.load.image('crazy_race_sign', '/sprites/lobby/crazy_race_sign.png');
+    this.load.image('rankings_sign', '/sprites/lobby/rankings_sign.png');
 
     for (const charKey of PL_CHAR_KEYS) {
       for (const dir of PL_DIRS) {
@@ -258,6 +289,8 @@ export class LobbyScene extends Phaser.Scene {
     this.buildingX = 913;
     this.buildingY = 369;
     this.drawBuilding(this.buildingX, this.buildingY);
+    // Melvin, the race host, idles by the garage door.
+    this.createMelvin(905, 452);
 
     // Gacha machine (lower-left).
     this.gachaX = 467;
@@ -289,6 +322,13 @@ export class LobbyScene extends Phaser.Scene {
 
     // Register animations
     this.registerAnimations();
+
+    // Ambient life: a crowd cheering at the stage + wandering NPCs. Skipped in
+    // the layout editor so they don't clutter it.
+    if (!new URLSearchParams(window.location.search).has('edit')) {
+      this.createCrowd(648, 415, 198, 78);
+      this.createNpcs(NPC_COUNT);
+    }
 
     // Player — spawn on the open arena floor (inside the walkable polygon).
     this.playerX = 650;
@@ -442,6 +482,7 @@ export class LobbyScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     if (this.editMode) return; // editor drives objects directly; no player sim
+    this.updateNpcs(delta);
     const speed = MOVE_SPEED * (delta / 1000);
 
     const w = this.keys.W.isDown;
@@ -549,21 +590,29 @@ export class LobbyScene extends Phaser.Scene {
       .setTint(BUILDING_TINT);
     b.setData('ename', 'race');
     this.solids.push(b);
-    // Vivid red+yellow glowing neon 'CRAZY RACE' sign.
-    const sign = this.add.text(bx, b.getTopCenter().y - 6, 'CRAZY RACE', {
-      fontSize: '16px', fontFamily: 'monospace', fontStyle: 'bold',
-    }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
-    const grad = sign.context.createLinearGradient(0, 0, 0, sign.height);
-    grad.addColorStop(0, '#fff27a');   // hot yellow core (top)
-    grad.addColorStop(0.5, '#ffc400'); // amber
-    grad.addColorStop(1, '#ff2a00');   // red (bottom)
-    sign.setFill(grad);
-    sign.setStroke('#5a0800', 2);
-    sign.setShadow(0, 0, '#ff3a00', 16, true, true); // red glow halo
-    this.tweens.add({
-      targets: sign, alpha: { from: 1, to: 0.82 },
-      duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-    });
+    this.placeBuildingSign('crazy_race_sign', bx + 6, b.getTopCenter().y + 58, 145);
+  }
+
+  /** Mount a glowing neon sign above a building, scaled to width, with a pulse.
+   *  If `label`/`color` are given, the text is drawn in code (exact casing) over
+   *  a blank panel — PixelLab can't render reliable capitals. */
+  private placeBuildingSign(texKey: string, x: number, bottomY: number, targetWidth: number, label?: string, color?: string): void {
+    if (!this.textures.exists(texKey)) return;
+    const sign = this.add.image(x, bottomY, texKey).setOrigin(0.5, 1).setDepth(ABOVE_PLAYERS);
+    sign.setScale(targetWidth / sign.width);
+    const pulse = (t: Phaser.GameObjects.GameObject): void => {
+      this.tweens.add({ targets: t, alpha: { from: 1, to: 0.85 }, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    };
+    pulse(sign);
+    if (label && color) {
+      const cyText = bottomY - sign.displayHeight * 0.52;
+      const txt = this.add.text(x, cyText, label, {
+        fontSize: '26px', fontFamily: 'monospace', fontStyle: 'bold', color,
+      }).setOrigin(0.5, 0.5).setDepth(ABOVE_PLAYERS + 0.1);
+      txt.setShadow(0, 0, color, 10, true, true); // neon glow
+      txt.setScale(Math.min(1, (targetWidth * 0.74) / txt.width)); // fit inside the panel
+      pulse(txt);
+    }
   }
 
   /** Draw a capsule-toy ("gachapon") machine. Placeholder art until real
@@ -600,10 +649,7 @@ export class LobbyScene extends Phaser.Scene {
     });
 
     // Label above the machine (sprite top sits at ~gy-108).
-    this.add.text(gx, gy - 114, 'GACHA', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#9fe6ff', fontStyle: 'bold',
-      stroke: '#001018', strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
+    this.placeBuildingSign('gacha_sign', gx - 6, machine.getTopCenter().y + 6, 70, 'GACHA', '#62ffb0');
   }
 
   /** Gatchaman — the cyborg cowboy drag queen NPC beside the gacha machine.
@@ -624,8 +670,34 @@ export class LobbyScene extends Phaser.Scene {
     this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
       .setScale(0.66).setOrigin(0.5, 0.9).setDepth(gy);
     this.gatchaman.setData('ename', 'gatchaman');
+    this.addNpcName('Gatchaman', gx, gy - 72);
     this.gatchaman.play('gatchaman_idle');
     this.startGatchamanChatter();
+  }
+
+  /** Yellow floating name above a named/interactive NPC (players use white). */
+  private addNpcName(name: string, x: number, y: number): void {
+    this.add.text(x, y, name, {
+      fontSize: '13px', fontFamily: 'monospace', color: '#ffe04a', fontStyle: 'bold',
+      stroke: '#1a1408', strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(D_LABEL);
+  }
+
+  /** Melvin — the Crazy Race host. Stands idle by the garage door with a name. */
+  private createMelvin(x: number, y: number): void {
+    if (!this.textures.exists('melvin_idle')) return;
+    if (!this.anims.exists('melvin_idle')) {
+      const frameCount = this.textures.get('melvin_idle').frameTotal - 1;
+      this.anims.create({
+        key: 'melvin_idle',
+        frames: this.anims.generateFrameNumbers('melvin_idle', { start: 0, end: Math.max(0, frameCount - 1) }),
+        frameRate: 5, repeat: -1,
+      });
+    }
+    this.add.sprite(x, y, 'melvin_idle')
+      .setScale(0.75).setOrigin(0.5, 0.85).setDepth(y)
+      .play('melvin_idle');
+    this.addNpcName('Melvin', x, y - 60);
   }
 
   /** Cycle Gatchaman's barks: a bubble shows for ~4s, then ~5s of silence
@@ -718,6 +790,160 @@ export class LobbyScene extends Phaser.Scene {
       if (((yi > py) !== (yj > py)) && x < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
     }
     return inside;
+  }
+
+  // ─── Ambient NPCs (wanderers + stage crowd; reuse player avatar art) ────────
+
+  /** A random walkable, non-solid point for an NPC to amble toward. */
+  private randomWalkablePoint(): { x: number; y: number } {
+    // Sample the interior of the floor (not the extreme edges) so wanderers
+    // don't aim at the perimeter and wedge against it.
+    for (let i = 0; i < 60; i++) {
+      const x = Phaser.Math.Between(290, 1010);
+      const y = Phaser.Math.Between(430, 660);
+      if (this.inWalkable(x, y) && !this.solidAt(x, y)) return { x, y };
+    }
+    return { x: 650, y: 540 }; // known-inside fallback
+  }
+
+  private pickNpcTarget(npc: WanderNpc): void {
+    const p = this.randomWalkablePoint();
+    npc.tx = p.x; npc.ty = p.y;
+    npc.stuckMs = 0;
+  }
+
+  /** Released items grouped by slot (for random NPC outfits), cached.
+   *  Hats/head accessories are intentionally excluded (the wizard hat is the
+   *  only released one and it sits off the body). */
+  private releasedItemsBySlot(): Record<string, string[]> {
+    if (this.releasedBySlot) return this.releasedBySlot;
+    const SLOTS = ['upper_body', 'lower_body', 'feet'];
+    const bySlot: Record<string, string[]> = {};
+    for (const [id, def] of Object.entries(ITEMS)) {
+      if ((def as { released?: boolean }).released === false) continue;
+      const slot = (def as { slot?: string }).slot;
+      if (slot && SLOTS.includes(slot)) (bySlot[slot] ??= []).push(id);
+    }
+    this.releasedBySlot = bySlot;
+    return bySlot;
+  }
+
+  /** A random outfit: always a top + bottom (fully clothed, no hat), random shoes. */
+  private randomLoadout(): Record<string, string> {
+    const bySlot = this.releasedItemsBySlot();
+    const loadout: Record<string, string> = {};
+    const rnd = (a: string[]): string => a[Math.floor(Math.random() * a.length)];
+    // Always 3 pieces: a tshirt, pants, and sneakers.
+    if (bySlot.upper_body?.length) loadout.upper_body = rnd(bySlot.upper_body);
+    if (bySlot.lower_body?.length) loadout.lower_body = rnd(bySlot.lower_body);
+    if (bySlot.feet?.length) loadout.feet = rnd(bySlot.feet);
+    return loadout;
+  }
+
+  /** Give an NPC a random outfit and build its equipment layers. */
+  private dressNpc(npc: WanderNpc): void {
+    npc.loadout = this.randomLoadout();
+    this.ensureEquipLoaded(npc.loadout, npc.charKey, () => {
+      if (!npc.sprite.active) return;
+      this.rebuildEquip(npc.equip, npc.loadout, npc.charKey, npc.sprite.y);
+    });
+  }
+
+  /** Spawn ambient NPCs that wander between random walkable points, dressed. */
+  private createNpcs(count: number): void {
+    for (let i = 0; i < count; i++) {
+      const charKey = PL_CHAR_KEYS[i % PL_CHAR_KEYS.length];
+      const { x, y } = this.randomWalkablePoint();
+      const sprite = this.add.sprite(x, y, `${charKey}_south-east`)
+        .setScale(0.75).setOrigin(0.5, 0.85).setDepth(y);
+      sprite.play(`${charKey}_idle_SD`);
+      const npc: WanderNpc = {
+        sprite, charKey, facing: 'SD', tx: x, ty: y, pauseUntil: 0,
+        stuckMs: 0, moving: false, isCrowd: false, loadout: {}, equip: new Map(),
+      };
+      this.pickNpcTarget(npc);
+      this.dressNpc(npc);
+      this.npcs.push(npc);
+    }
+  }
+
+  /** Move + animate the NPCs each frame (wanderers roam; crowd stands cheering). */
+  private updateNpcs(delta: number): void {
+    const step = NPC_SPEED * (delta / 1000);
+    const now = this.time.now;
+    for (const npc of this.npcs) {
+      const s = npc.sprite;
+      if (npc.isCrowd) { // stationary, facing the stage
+        npc.moving = false;
+        this.syncEquip(npc.equip, s.x, s.y, npc.facing, false, s.depth, s);
+        continue;
+      }
+      if (now >= npc.pauseUntil) {
+        const dx = npc.tx - s.x, dy = npc.ty - s.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 5) { // arrived → idle a moment, then a new spot
+          npc.pauseUntil = now + Phaser.Math.Between(1200, 3500);
+          npc.moving = false;
+          this.pickNpcTarget(npc);
+        } else {
+          const ux = dx / dist, uy = dy / dist;
+          const ox = s.x, oy = s.y;
+          if (this.inWalkable(s.x + ux * step, s.y) && !this.solidAt(s.x + ux * step, s.y)) s.x += ux * step;
+          if (this.inWalkable(s.x, s.y + uy * step) && !this.solidAt(s.x, s.y + uy * step)) s.y += uy * step;
+          const advanced = Math.hypot(s.x - ox, s.y - oy);
+          npc.stuckMs = advanced < step * 0.5 ? npc.stuckMs + delta : 0;
+          if (npc.stuckMs > 500) this.pickNpcTarget(npc); // wedged on an edge → retarget
+          npc.moving = advanced > 0.1;
+          if (npc.moving) {
+            const oct = ((Math.round(Math.atan2(uy, ux) / (Math.PI / 4)) % 8) + 8) % 8;
+            npc.facing = DIRS_BY_OCTANT[oct];
+            s.setFlipX(PIXELLAB_DIR_MAP[npc.facing].flipX);
+          }
+        }
+      } else {
+        npc.moving = false;
+      }
+      const animKey = npc.moving ? `${npc.charKey}_walk_${npc.facing}` : `${npc.charKey}_idle_${npc.facing}`;
+      if (s.anims.currentAnim?.key !== animKey) s.play(animKey, true);
+      s.setDepth(s.y);
+      this.syncEquip(npc.equip, s.x, s.y, npc.facing, npc.moving, s.y, s);
+    }
+  }
+
+  /** A dense, evenly-scrambled crowd in front of the band stage, all facing it.
+   *  Members keep a minimum spacing so they touch/overlap a little, not heavily. */
+  private createCrowd(cx: number, cy: number, rx: number, ry: number): void {
+    const placedPts: Array<[number, number]> = [];
+    const minDist = 15, spacing = 23; // jittered grid → even fill, no big gaps
+    for (let gy = cy - ry; gy <= cy + ry; gy += spacing) {
+      for (let gx = cx - rx; gx <= cx + rx; gx += spacing) {
+      const x = Math.round(gx + Phaser.Math.Between(-7, 7));
+      const y = Math.round(gy + Phaser.Math.Between(-6, 6));
+      const ex = (x - cx) / rx, ey = (y - cy) / ry;
+      if (ex * ex + ey * ey > 1) continue;                 // keep inside the oval
+      if (x > 812) continue;                               // clear of the Crazy Race building (right)
+      if (!this.inWalkable(x, y) || this.solidAt(x, y)) continue;
+      if (placedPts.some(([px, py]) => Math.hypot(px - x, py - y) < minDist)) continue;
+      placedPts.push([x, y]);
+      const charKey = PL_CHAR_KEYS[Phaser.Math.Between(0, PL_CHAR_KEYS.length - 1)];
+      const sprite = this.add.sprite(x, y, `${charKey}_north`)
+        .setScale(0.72).setOrigin(0.5, 0.85).setDepth(y);
+      sprite.setFlipX(PIXELLAB_DIR_MAP['W'].flipX);
+      sprite.play(`${charKey}_idle_W`); // 'W' = facing north, toward the stage
+      // Cheering bounce — staggered so the crowd ripples (equip follows via sync).
+      this.tweens.add({
+        targets: sprite, y: y - Phaser.Math.Between(3, 7),
+        duration: Phaser.Math.Between(320, 600), yoyo: true, repeat: -1,
+        ease: 'Sine.easeInOut', delay: Phaser.Math.Between(0, 600),
+      });
+      const npc: WanderNpc = {
+        sprite, charKey, facing: 'W', tx: x, ty: y, pauseUntil: 0,
+        stuckMs: 0, moving: false, isCrowd: true, loadout: {}, equip: new Map(),
+      };
+      this.dressNpc(npc);
+      this.npcs.push(npc);
+      }
+    }
   }
 
   // ─── Layout editor (?lobby&edit) ────────────────────────────────────────
@@ -1093,13 +1319,7 @@ export class LobbyScene extends Phaser.Scene {
       .setOrigin(0.5, 1).setScale(scale).setDepth(BEHIND_PLAYERS).setTint(BUILDING_TINT);
     board.setData('ename', 'leaderboard');
     this.solids.push(board);
-    if (tex === 'leaderboard_board') {
-      // Legacy placeholder needs a label; the iso board has its own screen text.
-      this.add.text(bx, board.getTopCenter().y - 4, 'LEADERBOARD', {
-        fontSize: '11px', fontFamily: 'monospace', color: '#ffe07a', fontStyle: 'bold',
-        stroke: '#1a1408', strokeThickness: 4,
-      }).setOrigin(0.5, 1).setDepth(BEHIND_PLAYERS + 0.1);
-    }
+    this.placeBuildingSign('rankings_sign', bx, board.getTopCenter().y + 10, 92, 'Rankings', '#ff6a6a');
   }
 
   // ─── Leaderboard (#23; walk-up board, top players by season XP) ─────────────
@@ -1415,13 +1635,22 @@ export class LobbyScene extends Phaser.Scene {
    *  missing file just means that layer is skipped (body still shows). */
   private ensureEquipLoaded(loadout: Record<string, string>, charKey: string, onReady: () => void): void {
     const toLoad: Array<{ itemId: string; slot: string; eqKey: string }> = [];
+    let waitingOnLoading = false;
     for (const itemId of Object.values(loadout)) {
       const eqKey = this.eqKeyFor(itemId, charKey);
       if (!eqKey) continue;
-      if (this.loadedEquip.has(eqKey) || this.loadingEquip.has(eqKey)) continue;
+      if (this.loadedEquip.has(eqKey)) continue;            // already ready
+      if (this.loadingEquip.has(eqKey)) { waitingOnLoading = true; continue; } // another caller is loading it
       toLoad.push({ itemId, slot: ITEMS[itemId].slot, eqKey });
     }
-    if (toLoad.length === 0) { onReady(); return; }
+    if (toLoad.length === 0) {
+      // Nothing new to queue. If a needed item is still in flight (queued by
+      // another NPC this frame), wait for the loader to finish before building,
+      // otherwise rebuildEquip would run on missing textures → naked NPCs.
+      if (waitingOnLoading) { this.load.once('complete', onReady); this.load.start(); }
+      else onReady();
+      return;
+    }
     const bust = new URLSearchParams(window.location.search).has('dev') ? `?v=${Date.now()}` : '';
     for (const { itemId, slot, eqKey } of toLoad) {
       this.loadingEquip.add(eqKey);
