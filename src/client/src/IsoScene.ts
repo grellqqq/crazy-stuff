@@ -169,6 +169,12 @@ const SEND_INTERVAL = 60;
 const MOVE_LERP_BASE = 0.0000004;      // normal movement (~RATE 14.7/s)
 const MOVE_LERP_SLOW_BASE = 0.00008;   // slow terrain / penalized / knockback
 
+// PixelLab body-sheet direction suffixes. Characters are loaded ON DEMAND per
+// charKey (ensureCharLoaded) when an avatar with that character appears, rather
+// than eagerly loading all 6 characters × 8 dirs × 4 anims (~192 sheets) up
+// front — which made the race "take forever to load" on slow connections.
+const PL_BODY_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 export class IsoScene extends Phaser.Scene {
@@ -266,22 +272,10 @@ export class IsoScene extends Phaser.Scene {
   // ─── Preload ───────────────────────────────────────────────────────────
 
   preload(): void {
-    // PixelLab character sprites — 8 directions, 92×92 frames
-    const PL_DIRS = ['south', 'south-east', 'east', 'north-east', 'north', 'north-west', 'west', 'south-west'];
-    // Dev cache-buster: base body sheets are regenerated on disk during art
-    // iteration (e.g. skin-tone recolors); without this the browser serves
-    // stale cached PNGs and the change silently "doesn't show up". Mirrors the
-    // equipment loader below.
-    const bust = new URLSearchParams(window.location.search).has('dev')
-      ? `?v=${Date.now()}` : '';
-    for (const charKey of PL_CHAR_KEYS) {
-      for (const dir of PL_DIRS) {
-        this.load.spritesheet(`${charKey}_${dir}`, `/sprites/characters/${charKey}/walk_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_run_${dir}`, `/sprites/characters/${charKey}/run_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_jump_${dir}`, `/sprites/characters/${charKey}/jump_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
-        this.load.spritesheet(`${charKey}_idle_${dir}`, `/sprites/characters/${charKey}/idle_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
-      }
-    }
+    // Character body sheets are NOT loaded here anymore — they're fetched per
+    // character on demand by ensureCharLoaded() when an avatar appears, so the
+    // race scene starts after loading only the tiles/objects below (+ the few
+    // characters actually in the race), not all 6 skins up front.
 
     // Tile textures
     this.load.image('tiles_grass', '/tiles/grass.png');
@@ -325,71 +319,9 @@ export class IsoScene extends Phaser.Scene {
 
     this.initEmptyTerrain();
 
-    // Create walk animations for all character types (8 directions)
-    const allDirs = ['S', 'SA', 'A', 'WA', 'W', 'WD', 'D', 'SD'];
-    for (const charKey of PL_CHAR_KEYS) {
-      const charDef = makeCharDef(charKey);
-      for (const dir of allDirs) {
-        const mapping = charDef.dirMap[dir];
-        if (charDef.multiSheet) {
-          // Multi-sheet: each direction is a separate texture
-          const textureKey = `${charDef.key}${mapping.sheetSuffix}`;
-          this.anims.create({
-            key: `${charDef.key}_walk_${dir}`,
-            frames: this.anims.generateFrameNumbers(textureKey, {
-              start: 0,
-              end: charDef.framesPerDir - 1,
-            }),
-            frameRate: 10,
-            repeat: -1,
-          });
-        } else {
-          // Single-sheet: directions are rows in one texture
-          const startFrame = (mapping.row ?? 0) * charDef.framesPerDir;
-          this.anims.create({
-            key: `${charDef.key}_walk_${dir}`,
-            frames: this.anims.generateFrameNumbers(charDef.key, {
-              start: startFrame,
-              end: startFrame + charDef.framesPerDir - 1,
-            }),
-            frameRate: 8,
-            repeat: -1,
-          });
-        }
-      }
-    }
-
-    // Create run, jump, and idle animations for all PixelLab characters
-    for (const charKey of PL_CHAR_KEYS) {
-      const charDef = makeCharDef(charKey);
-      for (const dir of allDirs) {
-        const mapping = charDef.dirMap[dir];
-        // Run animation (6 frames, looping)
-        const runTexture = `${charDef.key}_run${mapping.sheetSuffix}`;
-        this.anims.create({
-          key: `${charDef.key}_run_${dir}`,
-          frames: this.anims.generateFrameNumbers(runTexture, { start: 0, end: 5 }),
-          frameRate: 12,
-          repeat: -1,
-        });
-        // Jump animation (9 frames, plays once)
-        const jumpTexture = `${charDef.key}_jump${mapping.sheetSuffix}`;
-        this.anims.create({
-          key: `${charDef.key}_jump_${dir}`,
-          frames: this.anims.generateFrameNumbers(jumpTexture, { start: 0, end: 8 }),
-          frameRate: 16,
-          repeat: 0,
-        });
-        // Idle animation (4 frames, looping, slow)
-        const idleTexture = `${charDef.key}_idle${mapping.sheetSuffix}`;
-        this.anims.create({
-          key: `${charDef.key}_idle_${dir}`,
-          frames: this.anims.generateFrameNumbers(idleTexture, { start: 0, end: 3 }),
-          frameRate: 4,
-          repeat: -1,
-        });
-      }
-    }
+    // Character walk/run/jump/idle animations are now built per-character on
+    // demand in buildCharAnims() (called by ensureCharLoaded once a char's
+    // sheets finish loading), instead of building all 6 characters up front.
 
     // Generate a simple circle particle texture
     const particleGfx = this.make.graphics({ x: 0, y: 0 });
@@ -568,6 +500,9 @@ export class IsoScene extends Phaser.Scene {
     // so a rematch with the same players rebuilds instantly without touching the
     // loader at all — which is the freeze's main trigger.
     this.loadingEquipment.clear();
+    // Same for characters: drop pending char loads (loadedChars is kept — those
+    // textures/anims persist globally, so a rematch reuses them instantly).
+    this.loadingChars.clear();
   }
 
   // ─── Update ────────────────────────────────────────────────────────────
@@ -604,19 +539,21 @@ export class IsoScene extends Phaser.Scene {
       this.updateAvatarVisual(av, av.slotIndex === this.mySlotIndex);
     }
 
-    // Frozen/stuck flash
+    // Frozen/stuck flash. Gate on the local char being loaded so we don't
+    // force-show an avatar whose body sheets are still loading (lazy char).
     const localAv = this.avatars.get(this.mySlotIndex);
-    if (localAv && (localAv.frozen || localAv.stuck)) {
+    const localReady = !!localAv && this.loadedChars.has(this.charDefFor(localAv, true).key);
+    if (localReady && localAv && (localAv.frozen || localAv.stuck)) {
       const flash = Math.floor(_time / 500) % 2 === 0;
       localAv.bodySprite.setVisible(Math.floor(_time / 500) % 2 === 0);
       localAv.bodySprite.setAlpha(1);
       for (const [, s] of localAv.equipmentLayers) { s.setVisible(flash); s.setAlpha(1); }
-    } else if (localAv && localAv.immune) {
+    } else if (localReady && localAv && localAv.immune) {
       localAv.bodySprite.setVisible(true);
       const ghostAlpha = 0.5 + Math.sin(_time / 100) * 0.2;
       localAv.bodySprite.setAlpha(ghostAlpha);
       for (const [, s] of localAv.equipmentLayers) { s.setVisible(true); s.setAlpha(ghostAlpha); }
-    } else if (localAv) {
+    } else if (localReady && localAv) {
       localAv.bodySprite.setVisible(true);
       localAv.bodySprite.setAlpha(1);
       for (const [, s] of localAv.equipmentLayers) { s.setVisible(true); s.setAlpha(1); }
@@ -1281,6 +1218,65 @@ export class IsoScene extends Phaser.Scene {
     return this.slotConfigFor(av.slotIndex, isLocal).char;
   }
 
+  // ─── Lazy character loading ──────────────────────────────────────────────
+  /** charKeys whose body sheets are loaded + anims built (kept across rematch
+   *  restarts — textures/anims persist globally). */
+  private loadedChars = new Set<string>();
+  /** charKeys whose body sheets are currently being fetched. */
+  private loadingChars = new Set<string>();
+
+  /** Ensure a character's body spritesheets are loaded and its walk/run/jump/idle
+   *  anims are built, then run onReady. Characters load on demand (see preload)
+   *  so the race starts after loading only the chars actually present. */
+  private ensureCharLoaded(charKey: string, onReady?: () => void): void {
+    if (!charKey || !PL_CHAR_KEYS.includes(charKey)) { onReady?.(); return; }
+    if (this.loadedChars.has(charKey)) { onReady?.(); return; }
+
+    // Each caller registers its own one-shot 'complete' so a char shared by
+    // several avatars notifies them all; the anim build is guarded to run once.
+    this.load.once('complete', () => {
+      if (!this.loadedChars.has(charKey)) {
+        this.loadingChars.delete(charKey);
+        this.loadedChars.add(charKey);
+        this.buildCharAnims(charKey);
+      }
+      onReady?.();
+    });
+
+    if (!this.loadingChars.has(charKey)) {
+      this.loadingChars.add(charKey);
+      const bust = new URLSearchParams(window.location.search).has('dev') ? `?v=${Date.now()}` : '';
+      for (const dir of PL_BODY_DIRS) {
+        const base = `/sprites/characters/${charKey}`;
+        this.load.spritesheet(`${charKey}_${dir}`, `${base}/walk_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_run_${dir}`, `${base}/run_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_jump_${dir}`, `${base}/jump_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+        this.load.spritesheet(`${charKey}_idle_${dir}`, `${base}/idle_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
+      }
+    }
+    this.load.start();
+  }
+
+  /** Build walk/run/jump/idle anims (8 dirs) for one character. Extracted from
+   *  create() so it runs on demand once the char's sheets finish loading. */
+  private buildCharAnims(charKey: string): void {
+    const charDef = makeCharDef(charKey);
+    const allDirs = ['S', 'SA', 'A', 'WA', 'W', 'WD', 'D', 'SD'];
+    for (const dir of allDirs) {
+      const mapping = charDef.dirMap[dir];
+      if (charDef.multiSheet) {
+        const textureKey = `${charDef.key}${mapping.sheetSuffix}`;
+        this.anims.create({ key: `${charDef.key}_walk_${dir}`, frames: this.anims.generateFrameNumbers(textureKey, { start: 0, end: charDef.framesPerDir - 1 }), frameRate: 10, repeat: -1 });
+      } else {
+        const startFrame = (mapping.row ?? 0) * charDef.framesPerDir;
+        this.anims.create({ key: `${charDef.key}_walk_${dir}`, frames: this.anims.generateFrameNumbers(charDef.key, { start: startFrame, end: startFrame + charDef.framesPerDir - 1 }), frameRate: 8, repeat: -1 });
+      }
+      this.anims.create({ key: `${charDef.key}_run_${dir}`, frames: this.anims.generateFrameNumbers(`${charDef.key}_run${mapping.sheetSuffix}`, { start: 0, end: 5 }), frameRate: 12, repeat: -1 });
+      this.anims.create({ key: `${charDef.key}_jump_${dir}`, frames: this.anims.generateFrameNumbers(`${charDef.key}_jump${mapping.sheetSuffix}`, { start: 0, end: 8 }), frameRate: 16, repeat: 0 });
+      this.anims.create({ key: `${charDef.key}_idle_${dir}`, frames: this.anims.generateFrameNumbers(`${charDef.key}_idle${mapping.sheetSuffix}`, { start: 0, end: 3 }), frameRate: 4, repeat: -1 });
+    }
+  }
+
   private createAvatar(slotIndex: number, isLocal = false): AvatarData {
     const config = this.slotConfigFor(slotIndex, isLocal);
     const charDef = config.char;
@@ -1291,10 +1287,17 @@ export class IsoScene extends Phaser.Scene {
       : charDef.key;
 
     const shadow = this.add.graphics();
-    const bodySprite = this.add.sprite(0, 0, initialTexture, 0);
+    // Char sheets load on demand — use a transparent placeholder until ready so
+    // there's no green "missing texture" box, then swap to the real sheet.
+    const charLoaded = this.loadedChars.has(charDef.key);
+    const bodySprite = this.add.sprite(0, 0, charLoaded ? initialTexture : '__DEFAULT', 0);
     bodySprite.setScale(charDef.scale);
     bodySprite.setOrigin(charDef.originX, charDef.originY);
     bodySprite.setTint(config.tint);
+    bodySprite.setVisible(charLoaded);
+    this.ensureCharLoaded(charDef.key, () => {
+      if (this.textures.exists(initialTexture)) bodySprite.setTexture(initialTexture, 0);
+    });
 
     return {
       bodySprite,
@@ -1551,6 +1554,15 @@ export class IsoScene extends Phaser.Scene {
     const config = this.slotConfigFor(av.slotIndex, isLocal);
     // Body follows the player's real character (av.charKey), NOT the slot index.
     const charDef = this.charDefFor(av, isLocal);
+
+    // Lazy char: if this avatar's body sheets aren't loaded yet, kick the load
+    // and stay hidden until ready (avoids missing-texture + anim-not-found spam).
+    if (!this.loadedChars.has(charDef.key)) {
+      av.bodySprite.setVisible(false);
+      if (!this.loadingChars.has(charDef.key)) this.ensureCharLoaded(charDef.key);
+      return;
+    }
+    av.bodySprite.setVisible(true);
     // Remote avatars now follow the server-broadcast facing instead of a
     // hardcoded 'SD'; fall back to 'SD' until the first state with direction.
     const dir = isLocal ? this.playerFacing : (av.remoteFacing ?? 'SD');
@@ -1898,6 +1910,9 @@ export class IsoScene extends Phaser.Scene {
       const av = this.avatars.get(data.slotIndex);
       if (!av) return;
       av.charKey = data.charKey;
+      // Make sure the player's real character (which may differ from the slot
+      // default used at avatar creation) is loaded so its anims exist.
+      this.ensureCharLoaded(data.charKey);
       this.applyLoadout(av, data.loadout, data.charKey);
     });
 
