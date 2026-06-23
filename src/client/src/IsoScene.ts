@@ -306,6 +306,13 @@ export class IsoScene extends Phaser.Scene {
   // ─── Create ────────────────────────────────────────────────────────────
 
   create(): void {
+    // Rematch ("Play Again") re-runs create() on the SAME scene instance, so any
+    // race-1 state left in fields carries into race 2. Reset it deterministically
+    // up front, and (re)bind the loader error logger exactly once.
+    this.resetMatchState();
+    this.load.off('loaderror', this.onLoadError);
+    this.load.on('loaderror', this.onLoadError);
+
     this.initEmptyTerrain();
 
     // Create walk animations for all character types (8 directions)
@@ -514,6 +521,42 @@ export class IsoScene extends Phaser.Scene {
     // Clear tracking sets/maps
     this.crumbleWarnings.clear();
     this.collectedPickupIds.clear();
+  }
+
+  /** Logs equipment spritesheet load failures. Bound once per scene boot in
+   *  create() (applyLoadout used to add a fresh listener on every call, leaking
+   *  handlers across both races). */
+  private onLoadError = (file: { key: string }): void => {
+    console.warn(`[Equipment] failed to load: ${file.key}`);
+  };
+
+  /** Reset all per-match state so a rematch — which re-runs create() on the same
+   *  scene instance — behaves exactly like a fresh first race. Without this,
+   *  race-1 values leaked into race 2 and wedged it: phase stuck on Finished
+   *  (fired a spurious reset on the first state message), equipment stuck
+   *  "loading" forever (avatars never re-dressed), and stale inertia/identity. */
+  private resetMatchState(): void {
+    this.currentPhase = RacePhase.Waiting;
+    this.mySlotIndex = -1;
+    this.mySessionId = '';
+    this.raceStartTime = 0;
+    this.lastSendTime = 0;
+    this.wasSprinting = false;
+    this.inertiaRemaining = 0;
+    this.inertiaDir = null;
+    this.playerFacing = 'SD';
+    this.slimeZones = [];
+    this.buttons = [];
+    this.pickups = [];
+    this.localStamina = STAMINA_MAX;
+    this.collectedPickupIds.clear();
+    this.crumbleWarnings.clear();
+    // Drop equipment loads left pending from the previous race so they aren't
+    // treated as "still loading" forever. loadedEquipment is intentionally KEPT:
+    // those textures/anims persist on the global managers across a scene restart,
+    // so a rematch with the same players rebuilds instantly without touching the
+    // loader at all — which is the freeze's main trigger.
+    this.loadingEquipment.clear();
   }
 
   // ─── Update ────────────────────────────────────────────────────────────
@@ -1355,10 +1398,6 @@ export class IsoScene extends Phaser.Scene {
           this.load.spritesheet(`equip_${eqKey}_idle_${dir}`, `${basePath}/idle_${dir}.png${bust}`, { frameWidth: eqFrameSize, frameHeight: eqFrameSize });
       }
     }
-
-    this.load.on('loaderror', (file: { key: string }) => {
-      console.warn(`[Equipment] failed to load: ${file.key}`);
-    });
 
     this.load.once('complete', () => {
       console.log(`[Equipment] load complete for: ${toLoad.map((t) => t.eqKey).join(', ')}`);
