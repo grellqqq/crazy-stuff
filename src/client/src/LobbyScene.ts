@@ -2721,6 +2721,11 @@ export class LobbyScene extends Phaser.Scene {
   private async openInventory(): Promise<void> {
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
 
+    // Warm the shared body + item-overlay image cache in parallel with the fetch
+    // below, so each bag/equip card's drawItemThumbnail resolves from cache
+    // instead of awaiting two image loads per card on first open.
+    void preloadThumbnails(this.charKey);
+
     const panel = document.createElement('div');
     panel.style.cssText = `
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);

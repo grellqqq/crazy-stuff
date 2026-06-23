@@ -203,6 +203,7 @@ export class IsoScene extends Phaser.Scene {
   private phaseText!: Phaser.GameObjects.Text;
   private resultsContainer: HTMLDivElement | null = null;
   private rematchBtn: HTMLButtonElement | null = null;
+  private raceLoadingEl: HTMLDivElement | null = null;
   private timerText!: Phaser.GameObjects.Text;
   private announceText!: Phaser.GameObjects.Text;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -486,8 +487,9 @@ export class IsoScene extends Phaser.Scene {
     // Clear announcement timer
     if (this.announceTimer) { clearTimeout(this.announceTimer); this.announceTimer = null; }
 
-    // Remove results DOM overlay
+    // Remove results + connection-loading DOM overlays
     this.destroyResultsContainer();
+    this.hideRaceLoading();
 
     // Destroy infinite pickup tweens
     for (const t of this.pickupTweens) t.destroy();
@@ -1833,28 +1835,32 @@ export class IsoScene extends Phaser.Scene {
     const wsUrl = `${protocol}//${host}:${wsPort}`;
     const client = new Client(wsUrl);
     const token = this.authState?.session?.access_token;
+    this.showRaceLoading('Joining race…');
+    // Bound the join so a stalled WS handshake can't hang on a blank screen
+    // forever ("sometimes the race never loaded"). 12s, then surface an error.
+    const withTimeout = <T>(p: Promise<T>): Promise<T> => Promise.race([
+      p,
+      new Promise<T>((_, rej) => setTimeout(() => rej(new Error('join timed out')), 12000)),
+    ]);
     let room;
     try {
       // The queue hands us a specific race room id so the whole group lands in
       // the SAME room — join it directly. Fall back to joinOrCreate only if that
       // fails (e.g. the room was disposed) or when entering the race standalone.
       room = raceRoomId
-        ? await client.joinById(raceRoomId, { playerName: name, token })
-        : await client.joinOrCreate('race', { playerName: name, token });
+        ? await withTimeout(client.joinById(raceRoomId, { playerName: name, token }))
+        : await withTimeout(client.joinOrCreate('race', { playerName: name, token }));
     } catch (e) {
-      if (raceRoomId) {
-        try {
-          room = await client.joinOrCreate('race', { playerName: name, token });
-        } catch {
-          alert('Could not join the game. It may already be open in another tab.');
-          return;
-        }
-      } else {
-        alert('Could not join the game. It may already be open in another tab.');
+      // Targeted room gone/unreachable, or timed out — try plain matchmaking once.
+      try {
+        room = await withTimeout(client.joinOrCreate('race', { playerName: name, token }));
+      } catch {
+        this.showRaceLoadError();
         return;
       }
     }
     this.room = room;
+    this.showRaceLoading('Loading race…');
     this.mySessionId = room.sessionId;
 
     room.onMessage('error', (data: { message: string }) => {
@@ -1876,6 +1882,7 @@ export class IsoScene extends Phaser.Scene {
       this.renderMinimap();
       this.renderButtonLabels();
       this.renderPickups();
+      this.hideRaceLoading();
     });
 
     room.onMessage('playerLoadout', (data: { slotIndex: number; charKey: string; loadout: Record<string, string> }) => {
@@ -2635,6 +2642,48 @@ export class IsoScene extends Phaser.Scene {
   private updateRematchVoteStatus(votes: number, needed: number): void {
     const el = document.getElementById('rematch-vote-status');
     if (el) el.textContent = `Rematch votes: ${votes} / ${needed}`;
+  }
+
+  // ─── Race connection loading / error overlay ────────────────────────────
+
+  /** Show a centered loading message while joining the race + waiting for the
+   *  map (previously the screen was blank with no feedback if a join hung). */
+  private showRaceLoading(text: string): void {
+    if (!this.raceLoadingEl) {
+      const el = document.createElement('div');
+      el.style.cssText = `
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        background: rgba(0,0,0,0.85); color: #fff; font-family: monospace;
+        padding: 20px 28px; border-radius: 8px; z-index: 10000; text-align: center;
+        font-size: 15px; min-width: 240px;
+      `;
+      document.body.appendChild(el);
+      this.raceLoadingEl = el;
+    }
+    this.raceLoadingEl.textContent = text;
+  }
+
+  private hideRaceLoading(): void {
+    if (this.raceLoadingEl) { this.raceLoadingEl.remove(); this.raceLoadingEl = null; }
+  }
+
+  /** Connection failed/timed out — surface it with a way back instead of a
+   *  blank screen the player can't escape. */
+  private showRaceLoadError(): void {
+    this.showRaceLoading('');
+    const el = this.raceLoadingEl!;
+    el.innerHTML = '<div style="margin-bottom:12px;">Could not connect to the race.<br>It may be full, or the connection timed out.</div>';
+    const back = document.createElement('button');
+    back.textContent = 'Back to Lobby';
+    back.style.cssText = `
+      padding: 8px 24px; font-size: 14px; font-family: monospace; cursor: pointer;
+      background: #44bb44; color: #fff; border: none; border-radius: 6px;
+    `;
+    back.onclick = () => {
+      this.hideRaceLoading();
+      this.scene.start('LobbyScene', { authState: this.authState });
+    };
+    el.appendChild(back);
   }
 
   // ─── Particles ─────────────────────────────────────────────────────────

@@ -45,7 +45,9 @@ export async function connectDB(): Promise<Db> {
   await db.collection('users').createIndex({ username: 1 }, { unique: true });
   await db.collection('users').createIndex({ googleSub: 1 }, { sparse: true });
   await db.collection('players').createIndex({ userId: 1 }, { unique: true });
-  await db.collection('inventory').createIndex({ playerId: 1 });
+  // Compound so getInventory's `find({playerId}).sort({obtainedAt:-1})` is fully
+  // index-served (was playerId-only → an in-memory sort on every inventory open).
+  await db.collection('inventory').createIndex({ playerId: 1, obtainedAt: -1 });
   // Gacha: pullId is the idempotency key (one pull request → one outcome).
   await db.collection('pulls').createIndex({ pullId: 1 }, { unique: true });
   await db.collection('pulls').createIndex({ userId: 1, createdAt: -1 });
