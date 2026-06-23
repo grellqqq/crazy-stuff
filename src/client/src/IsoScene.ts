@@ -160,6 +160,15 @@ interface AvatarData {
 
 const SEND_INTERVAL = 60;
 
+// Avatar position smoothing. `t = 1 - base^(dt/1000)` per frame; a SMALLER base
+// = snappier catch-up. The server moves a walking player every ~100ms
+// (DEFAULT_COOLDOWN), so the old base (0.00005 ≈ 300ms to arrive) left the
+// avatar perpetually floating behind its real tile — the "laggy/floaty" feel.
+// These reach the tile in ~110ms / ~200ms, keeping pace with the move cadence
+// while still gliding. Tuning knobs — raise toward 0.001 for floatier.
+const MOVE_LERP_BASE = 0.0000004;      // normal movement (~RATE 14.7/s)
+const MOVE_LERP_SLOW_BASE = 0.00008;   // slow terrain / penalized / knockback
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 export class IsoScene extends Phaser.Scene {
@@ -564,10 +573,10 @@ export class IsoScene extends Phaser.Scene {
   // ─── Update ────────────────────────────────────────────────────────────
 
   update(_time: number, _delta: number): void {
-    // Base lerp factor — frame-rate independent
-    const tNormal = 1 - Math.pow(0.00005, _delta / 1000);
+    // Base lerp factor — frame-rate independent (snappier; see MOVE_LERP_BASE)
+    const tNormal = 1 - Math.pow(MOVE_LERP_BASE, _delta / 1000);
     // Slower lerp for slow terrain — spreads movement over more frames (less jerky)
-    const tSlow = 1 - Math.pow(0.0003, _delta / 1000);
+    const tSlow = 1 - Math.pow(MOVE_LERP_SLOW_BASE, _delta / 1000);
 
     for (const av of this.avatars.values()) {
       const dx = av.tileX - av.displayX;
