@@ -1996,11 +1996,12 @@ export class LobbyScene extends Phaser.Scene {
         this.updateQueueCountdown(data.seconds, data.cancelled ?? false);
       });
 
-      this.queueRoom.onMessage('launchRace', () => {
+      this.queueRoom.onMessage('launchRace', (data: { roomId?: string | null }) => {
         this.destroyQueueUI();
         this.cameras.main.flash(300, 255, 200, 50);
+        const raceRoomId = data?.roomId ?? null;
         this.time.delayedCall(400, () => {
-          this.scene.start('IsoScene', { authState: this.authState });
+          this.scene.start('IsoScene', { authState: this.authState, raceRoomId });
         });
       });
 

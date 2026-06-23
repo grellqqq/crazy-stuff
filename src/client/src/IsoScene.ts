@@ -1812,8 +1812,9 @@ export class IsoScene extends Phaser.Scene {
 
   private async connectToRace(): Promise<void> {
     // Auth state passed from TitleScene
-    const sceneData = this.scene.settings.data as { authState?: AuthState } | undefined;
+    const sceneData = this.scene.settings.data as { authState?: AuthState; raceRoomId?: string | null } | undefined;
     this.authState = sceneData?.authState ?? null;
+    const raceRoomId = sceneData?.raceRoomId ?? null;
     const name = this.authState?.username ?? 'Player';
 
     // Fetch and show player profile HUD
@@ -1834,10 +1835,24 @@ export class IsoScene extends Phaser.Scene {
     const token = this.authState?.session?.access_token;
     let room;
     try {
-      room = await client.joinOrCreate('race', { playerName: name, token });
+      // The queue hands us a specific race room id so the whole group lands in
+      // the SAME room — join it directly. Fall back to joinOrCreate only if that
+      // fails (e.g. the room was disposed) or when entering the race standalone.
+      room = raceRoomId
+        ? await client.joinById(raceRoomId, { playerName: name, token })
+        : await client.joinOrCreate('race', { playerName: name, token });
     } catch (e) {
-      alert('Could not join the game. It may already be open in another tab.');
-      return;
+      if (raceRoomId) {
+        try {
+          room = await client.joinOrCreate('race', { playerName: name, token });
+        } catch {
+          alert('Could not join the game. It may already be open in another tab.');
+          return;
+        }
+      } else {
+        alert('Could not join the game. It may already be open in another tab.');
+        return;
+      }
     }
     this.room = room;
     this.mySessionId = room.sessionId;

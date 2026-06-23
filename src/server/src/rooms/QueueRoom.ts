@@ -1,4 +1,4 @@
-import { Room, Client } from 'colyseus';
+import { Room, Client, matchMaker } from 'colyseus';
 import { Schema, type, ArraySchema } from '@colyseus/schema';
 import { verifyToken } from '../auth/jwt';
 
@@ -120,15 +120,24 @@ export class QueueRoom extends Room<QueueState> {
     this.broadcast('countdown', { seconds: 0, cancelled: true });
   }
 
-  private launchRace(): void {
-    // Send launch signal with player info
-    const players = this.state.players.map(p => ({
-      sessionId: p.sessionId,
-      playerName: p.playerName,
-      authId: this.authIds.get(p.sessionId) ?? null,
-    }));
-    this.broadcast('launchRace', { players });
-    console.log(`[QueueRoom] launching race with ${players.length} players`);
+  private async launchRace(): Promise<void> {
+    // Create ONE race room up front and hand every queued client its id, so they
+    // all `joinById` the SAME room. Previously each client independently called
+    // joinOrCreate('race') at the same instant (same launchRace broadcast), and
+    // Colyseus's create race could spin up a second room — splitting a 5-player
+    // group into e.g. 3 + 2. Creating the room here removes that race entirely.
+    let roomId: string | null = null;
+    try {
+      const room = await matchMaker.createRoom('race', {});
+      roomId = room.roomId;
+      console.log(`[QueueRoom] launching race ${roomId} with ${this.state.players.length} players`);
+    } catch (e) {
+      // Fall back to client-side joinOrCreate if room creation fails — better a
+      // possible split than no race at all.
+      console.error('[QueueRoom] createRoom failed; clients will fall back to joinOrCreate', e);
+    }
+
+    this.broadcast('launchRace', { roomId });
 
     // Disconnect all clients after a brief delay (they'll join the RaceRoom)
     setTimeout(() => {
