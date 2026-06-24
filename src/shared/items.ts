@@ -87,6 +87,8 @@ type NewOpts = {
   fitProfile: FitProfile;
   frameSize?: number;
   availableAnims?: EquipmentAnim[];
+  /** Flip true once the item's art exists (puts it in the gacha pool). */
+  released?: boolean;
 };
 
 /** A single not-yet-released catalog entry. */
@@ -102,7 +104,7 @@ function mk(
     fitProfile: opts.fitProfile,
     ...(opts.frameSize ? { frameSize: opts.frameSize } : {}),
     availableAnims: opts.availableAnims ?? HAT_ANIMS,
-    released: false,
+    released: opts.released ?? false,
   };
 }
 
@@ -231,7 +233,9 @@ const FEET_NEW: ItemDef[] = [
 ];
 
 const HEAD_NEW: ItemDef[] = [
-  mk('beanie', 'head_accessory', 'common', 'Beanie', SHARED_HEAD),
+  // Released batch 1 — art extracted at 92px (v4 head-band pipeline), not the
+  // 132px wizard-hat era. Omit frameSize so it defaults to 92.
+  mk('beanie', 'head_accessory', 'common', 'Beanie', { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true }),
   mk('baseball_cap', 'head_accessory', 'common', 'Baseball Cap', SHARED_HEAD),
   mk('headband', 'head_accessory', 'common', 'Headband', SHARED_HEAD),
   mk('bucket_hat', 'head_accessory', 'uncommon', 'Bucket Hat', SHARED_HEAD),

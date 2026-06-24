@@ -63,6 +63,11 @@ ITEMS = {
                     # ground anims: feet never rise above row 68 — clamping
                     # kills shin render-noise streaks riding above the shoes
                     "band_ground": (68, 92)},
+    # Head accessories: shared (one /male/ set), walk+idle only, 92px frame like
+    # the body. The head band isolates the hat (the state keeps hair/face, so the
+    # only diff in the top rows is the hat itself, incl. hair it replaces).
+    "beanie":          {"slot": "head_accessory", "band": (0, 32), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
@@ -144,6 +149,10 @@ def color_gate(state, kind):
         return (sat < 35) & (lum > 55) & (lum < 190)
     if kind == "neutral":   # sneakers: whites/greys/dark soles, never skin
         return (sat < 65) | (lum < 60)
+    if kind == "headwear":  # grey/black hats: desaturated at any luminance
+        # (keeps the hat + its black outline), rejects the warm skin pixels the
+        # state redraws under the head band — the face-ghosting we saw.
+        return sat < 40
     return np.ones((FS, FS), dtype=bool)
 
 
@@ -261,9 +270,10 @@ def gen_item(item, body, cfg, bad=frozenset()):
     out_dir = OUT_DIR.format(slot=cfg["slot"], item=item, body=body)
     os.makedirs(out_dir, exist_ok=True)
     print(f"{item} ({cfg['slot']}) body={body}")
+    anims = cfg.get("anims", ANIMS)
     missing = 0
     for direction in PRIMARY_DIRS:
-        for anim in ANIMS:
+        for anim in anims:
             nf = FRAME_COUNTS[anim]
             frames = []
             bases = []
@@ -325,7 +335,7 @@ def gen_item(item, body, cfg, bad=frozenset()):
                 # direction, shifted per-frame by the base-body centroid delta.
                 # ANIMS order puts idle/walk/run before jump, so their sheets
                 # are on disk by the time jump needs a donor.
-                for alt in ANIMS:
+                for alt in anims:
                     if alt == anim:
                         continue
                     ap = f"{out_dir}/{alt}_{direction}.png"
@@ -353,7 +363,7 @@ def gen_item(item, body, cfg, bad=frozenset()):
                     sheet[:, i * FS:(i + 1) * FS] = fr
             save_rgba(sheet, f"{out_dir}/{anim}_{direction}.png")
         print(f"  {direction}: done")
-    for anim in ANIMS:
+    for anim in anims:
         for src, dst in MIRROR_PAIRS:
             sp = f"{out_dir}/{anim}_{src}.png"
             if os.path.exists(sp):
