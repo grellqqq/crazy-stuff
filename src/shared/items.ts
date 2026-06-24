@@ -137,6 +137,9 @@ const CARGO3 = ['green', 'brown', 'black'] as const;
 
 const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS };
 const SHARED_HEAD: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
+// Released head accessories — art produced via the v4 head-band pipeline at 92px
+// (omit frameSize → defaults 92). Flip items to this as their art lands.
+const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true };
 const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }; // frame 92
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };
@@ -233,15 +236,14 @@ const FEET_NEW: ItemDef[] = [
 ];
 
 const HEAD_NEW: ItemDef[] = [
-  // Released batch 1 — art extracted at 92px (v4 head-band pipeline), not the
-  // 132px wizard-hat era. Omit frameSize so it defaults to 92.
-  mk('beanie', 'head_accessory', 'common', 'Beanie', { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true }),
-  mk('baseball_cap', 'head_accessory', 'common', 'Baseball Cap', SHARED_HEAD),
+  // Released batch 1 (2026-06-24) — art via v4 head-band pipeline at 92px.
+  mk('beanie', 'head_accessory', 'common', 'Beanie', HEAD_RELEASED),
+  mk('baseball_cap', 'head_accessory', 'common', 'Baseball Cap', HEAD_RELEASED),
   mk('headband', 'head_accessory', 'common', 'Headband', SHARED_HEAD),
   mk('bucket_hat', 'head_accessory', 'uncommon', 'Bucket Hat', SHARED_HEAD),
-  mk('snapback', 'head_accessory', 'uncommon', 'Snapback', SHARED_HEAD),
+  mk('snapback', 'head_accessory', 'uncommon', 'Snapback', HEAD_RELEASED),
   mk('beret', 'head_accessory', 'uncommon', 'Beret', SHARED_HEAD),
-  mk('top_hat', 'head_accessory', 'rare', 'Top Hat', SHARED_HEAD),
+  mk('top_hat', 'head_accessory', 'rare', 'Top Hat', HEAD_RELEASED),
   mk('bay_leaf_crown', 'head_accessory', 'rare', 'Bay Leaf Crown', SHARED_HEAD),
   mk('beer_can_cap', 'head_accessory', 'rare', 'Beer-can Cap', SHARED_HEAD),
   mk('helicopter_cap', 'head_accessory', 'rare', 'Helicopter Cap', SHARED_HEAD),

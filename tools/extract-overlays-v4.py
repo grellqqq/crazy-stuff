@@ -68,6 +68,12 @@ ITEMS = {
     # only diff in the top rows is the hat itself, incl. hair it replaces).
     "beanie":          {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
                         "gate": "headwear", "anims": ["idle", "walk"]},
+    "top_hat":         {"slot": "head_accessory", "band": (0, 26), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
+    "snapback":        {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
+    "baseball_cap":    {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
