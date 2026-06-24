@@ -74,6 +74,14 @@ ITEMS = {
                         "gate": "headwear", "anims": ["idle", "walk"]},
     "baseball_cap":    {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
                         "gate": "headwear", "anims": ["idle", "walk"]},
+    "beret":           {"slot": "head_accessory", "band": (0, 26), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
+    "bucket_hat":      {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
+    "headband":        {"slot": "head_accessory", "band": (0, 28), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
+    "vr_headset":      {"slot": "head_accessory", "band": (0, 30), "diff_min": 30,
+                        "gate": "headwear", "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
