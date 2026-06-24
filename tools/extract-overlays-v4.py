@@ -66,7 +66,7 @@ ITEMS = {
     # Head accessories: shared (one /male/ set), walk+idle only, 92px frame like
     # the body. The head band isolates the hat (the state keeps hair/face, so the
     # only diff in the top rows is the hat itself, incl. hair it replaces).
-    "beanie":          {"slot": "head_accessory", "band": (0, 32), "diff_min": 30,
+    "beanie":          {"slot": "head_accessory", "band": (0, 24), "diff_min": 30,
                         "gate": "headwear", "anims": ["idle", "walk"]},
 }
 
