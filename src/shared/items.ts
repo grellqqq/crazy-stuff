@@ -67,6 +67,14 @@ export interface ItemDef {
    * See `inGachaPool` and design/gdd/item-catalog.md §4.7.
    */
   released?: boolean;
+  /**
+   * Whether the idle overlay should ANIMATE in sync with the body's breathing
+   * idle (frame-locked to the body frame) instead of holding one static frame.
+   * Default (omitted) = static-pin, which hides the broken back/side idle frames
+   * the older garment sheets have. Set true for items with clean 4-frame idle
+   * sheets (the v4 head-band hats) so the hat bobs with the head.
+   */
+  idleAnimates?: boolean;
 }
 
 const FULL_ANIMS: EquipmentAnim[] = ['walk', 'idle', 'run', 'jump'];
@@ -89,6 +97,8 @@ type NewOpts = {
   availableAnims?: EquipmentAnim[];
   /** Flip true once the item's art exists (puts it in the gacha pool). */
   released?: boolean;
+  /** Animate the idle overlay in sync with the body (clean idle sheets only). */
+  idleAnimates?: boolean;
 };
 
 /** A single not-yet-released catalog entry. */
@@ -105,6 +115,7 @@ function mk(
     ...(opts.frameSize ? { frameSize: opts.frameSize } : {}),
     availableAnims: opts.availableAnims ?? HAT_ANIMS,
     released: opts.released ?? false,
+    ...(opts.idleAnimates ? { idleAnimates: true } : {}),
   };
 }
 
@@ -139,7 +150,7 @@ const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_AN
 const SHARED_HEAD: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 // Released head accessories — art produced via the v4 head-band pipeline at 92px
 // (omit frameSize → defaults 92). Flip items to this as their art lands.
-const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true };
+const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
 const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }; // frame 92
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };

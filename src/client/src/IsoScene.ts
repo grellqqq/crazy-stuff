@@ -1670,8 +1670,15 @@ export class IsoScene extends Phaser.Scene {
       // run/jump never drift. bodyFrame.index is 1-based → 0-based array pos.
       if (equipAnimType === 'idle' && equipSprite.anims.currentAnim) {
         const equipFrames = equipSprite.anims.currentAnim.frames;
-        const best = this.bestIdleFrame.get(equipAnimKey) ?? 0;
-        const target = equipFrames[Math.min(best, equipFrames.length - 1)];
+        let target;
+        if (ITEMS[equipSprite.getData('itemId')]?.idleAnimates && bodyFrame) {
+          // Clean idle sheet → frame-lock to the body so the overlay bobs with it.
+          target = equipFrames[Math.min(bodyFrame.index - 1, equipFrames.length - 1)];
+        } else {
+          // Older sheets → pin the fullest frame so broken frames can't flash.
+          const best = this.bestIdleFrame.get(equipAnimKey) ?? 0;
+          target = equipFrames[Math.min(best, equipFrames.length - 1)];
+        }
         if (target && equipSprite.anims.currentFrame !== target) {
           equipSprite.anims.setCurrentFrame(target);
         }

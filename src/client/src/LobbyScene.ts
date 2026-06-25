@@ -1812,6 +1812,7 @@ export class LobbyScene extends Phaser.Scene {
       const sprite = this.add.sprite(0, 0, tex, 0)
         .setScale(0.75 * (92 / fs)).setOrigin(0.5, 0.85).setDepth(baseDepth + 0.001 * idx);
       sprite.setData('eqKey', eqKey);
+      sprite.setData('itemId', itemId);
       target.set(slot, sprite);
       idx++;
     }
@@ -1845,13 +1846,21 @@ export class LobbyScene extends Phaser.Scene {
           s.setVisible(false);
         }
       } else {
-        // Idle: hold the fullest frame so broken back/side frames can't flash.
         const idleTex = `equip_${eqKey}_idle_${suffix}`;
         if (this.textures.exists(idleTex)) {
           s.setVisible(true);
           if (s.anims.isPlaying) s.anims.stop();
-          const best = this.bestIdleFrame.get(idleTex) ?? 0;
-          if (s.texture.key !== idleTex || s.frame.name !== String(best)) s.setTexture(idleTex, best);
+          if (ITEMS[s.getData('itemId')]?.idleAnimates && bodyFrame) {
+            // Clean idle sheet: frame-lock to the body's idle frame so the hat
+            // bobs/sways WITH the head instead of hanging frozen.
+            const n = this.textures.get(idleTex).frameTotal - 1; // minus __BASE
+            const fi = Math.max(0, Math.min(bodyFrame.index - 1, n - 1));
+            if (s.texture.key !== idleTex || s.frame.name !== String(fi)) s.setTexture(idleTex, fi);
+          } else {
+            // Older sheets: hold the fullest frame so broken back/side frames can't flash.
+            const best = this.bestIdleFrame.get(idleTex) ?? 0;
+            if (s.texture.key !== idleTex || s.frame.name !== String(best)) s.setTexture(idleTex, best);
+          }
         } else {
           s.setVisible(false);
         }
