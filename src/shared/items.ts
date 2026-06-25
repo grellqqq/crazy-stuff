@@ -246,12 +246,12 @@ const HEAD_NEW: ItemDef[] = [
   mk('top_hat', 'head_accessory', 'rare', 'Top Hat', HEAD_RELEASED),
   mk('bay_leaf_crown', 'head_accessory', 'rare', 'Bay Leaf Crown', HEAD_RELEASED),
   mk('beer_can_cap', 'head_accessory', 'rare', 'Beer-can Cap', HEAD_RELEASED),
-  mk('helicopter_cap', 'head_accessory', 'rare', 'Helicopter Cap', SHARED_HEAD),
-  mk('tiara', 'head_accessory', 'epic', 'Tiara', SHARED_HEAD),
-  mk('halo', 'head_accessory', 'epic', 'Halo', SHARED_HEAD),
+  mk('helicopter_cap', 'head_accessory', 'rare', 'Helicopter Cap', HEAD_RELEASED),
+  mk('tiara', 'head_accessory', 'epic', 'Tiara', HEAD_RELEASED),
+  mk('halo', 'head_accessory', 'epic', 'Halo', HEAD_RELEASED),
   mk('vr_headset', 'head_accessory', 'epic', 'VR Headset', HEAD_RELEASED),
-  mk('flaming_crown', 'head_accessory', 'legendary', 'Flaming Crown', SHARED_HEAD),
-  mk('traffic_cone_hat', 'head_accessory', 'crazy', 'Traffic Cone Hat', SHARED_HEAD),
+  mk('flaming_crown', 'head_accessory', 'legendary', 'Flaming Crown', HEAD_RELEASED),
+  mk('traffic_cone_hat', 'head_accessory', 'crazy', 'Traffic Cone Hat', HEAD_RELEASED),
 ];
 
 const HAIR_NEW: ItemDef[] = [
