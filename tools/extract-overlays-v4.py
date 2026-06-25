@@ -50,6 +50,10 @@ SPECK_MIN = 4         # connected garment areas smaller than this are render noi
 ITEMS = {
     "worn_tshirt":     {"slot": "upper_body", "band": (28, 70), "diff_min": 40,
                         "gate": "grey", "fill_holes": True},
+    # Tops (gendered, full anims). "noskin" gate keeps any garment colour and
+    # rejects the warm arm/face skin the state redraws. Band covers collar→waist.
+    "leather_jacket":  {"slot": "upper_body", "band": (24, 64), "diff_min": 34,
+                        "gate": "noskin", "fill_holes": True},
     # uniform_shade: source frames come from different generation batches
     # (template renders + transfer repairs) whose denim tone/wash drifts —
     # in motion that reads as per-frame flashing. Recoloring every overlay
