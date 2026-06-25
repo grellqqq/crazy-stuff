@@ -82,6 +82,21 @@ ITEMS = {
                         "gate": "headwear", "anims": ["idle", "walk"]},
     "vr_headset":      {"slot": "head_accessory", "band": (0, 30), "diff_min": 30,
                         "gate": "headwear", "anims": ["idle", "walk"]},
+    # Colored hats — "noskin" gate keeps any hat colour, rejects face skin.
+    "bay_leaf_crown":  {"slot": "head_accessory", "band": (0, 26), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "beer_can_cap":    {"slot": "head_accessory", "band": (0, 26), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "helicopter_cap":  {"slot": "head_accessory", "band": (0, 24), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "tiara":           {"slot": "head_accessory", "band": (0, 24), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "halo":            {"slot": "head_accessory", "band": (0, 18), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "flaming_crown":   {"slot": "head_accessory", "band": (0, 24), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
+    "traffic_cone_hat":{"slot": "head_accessory", "band": (0, 28), "diff_min": 28,
+                        "gate": "noskin", "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
@@ -167,6 +182,11 @@ def color_gate(state, kind):
         # (keeps the hat + its black outline), rejects the warm skin pixels the
         # state redraws under the head band — the face-ghosting we saw.
         return sat < 40
+    if kind == "noskin":    # colored hats: keep ANY hat colour, reject only the
+        # warm face skin the state redraws under the band. Skin = reddish
+        # (r>b), mid-bright, moderately saturated; vivid hats sit outside this.
+        skin = (r > b + 8) & (r > 105) & (sat > 12) & (sat < 95) & (lum > 92)
+        return ~skin
     return np.ones((FS, FS), dtype=bool)
 
 
