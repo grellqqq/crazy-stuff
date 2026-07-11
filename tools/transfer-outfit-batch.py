@@ -12,7 +12,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Config
 API_URL = "https://api.pixellab.ai/v2/transfer-outfit-v2"
 JOB_URL = "https://api.pixellab.ai/v2/background-jobs"
-TOKEN = os.environ["PIXELLAB_API_KEY"]
+def _api_key():
+    k = os.environ.get("PIXELLAB_API_KEY")
+    if k:
+        return k
+    import re
+    for line in open(".env", encoding="utf-8"):
+        m = re.match(r'\s*PIXELLAB_API_KEY\s*=\s*"?([^"\n]+)"?', line)
+        if m:
+            return m.group(1).strip()
+    raise SystemExit("PIXELLAB_API_KEY not found in env or .env")
+
+
+TOKEN = _api_key()
 HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
 # Body shape: selects which base frames to transfer onto and which overlay

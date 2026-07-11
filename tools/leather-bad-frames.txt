@@ -1,0 +1,2 @@
+leather_jacket male walk south f5
+leather_jacket male walk south f6

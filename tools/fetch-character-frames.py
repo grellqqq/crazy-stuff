@@ -35,8 +35,12 @@ def api_key():
 
 
 def game_anim(folder, frame_count=None):
+    # Folders are named after the ACTION DESCRIPTION slug when a custom
+    # description is used (e.g. "standing_still_breathing_calmly_wearing"),
+    # so match on the leading verb, not exact template names.
     for pre, g in [("walking", "walk"), ("running", "run"),
-                   ("jumping", "jump"), ("breathing", "idle")]:
+                   ("jumping", "jump"), ("breathing", "idle"),
+                   ("standing", "idle")]:
         if folder.startswith(pre):
             return g
     # template animations come back as generic "animating[-hash]" folders;

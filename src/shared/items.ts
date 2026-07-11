@@ -136,6 +136,8 @@ function colorFamily(
 
 // Named color sets (item-catalog.md §2).
 const TEE10 = ['black', 'blue', 'brown', 'green', 'pink', 'purple', 'red', 'stripes', 'white', 'yellow'] as const;
+// Hoodie family excludes 'stripes' (the striped recolor didn't read well).
+const HOODIE_COLORS = ['black', 'blue', 'brown', 'green', 'pink', 'purple', 'red', 'white', 'yellow'] as const;
 const TRACK8 = ['black', 'blue', 'green', 'grey', 'red', 'pink', 'white', 'yellow'] as const;
 const HAIR5 = ['brown', 'black', 'blonde', 'red', 'blue'] as const;
 const CAPE4 = ['red', 'blue', 'black', 'purple'] as const;
@@ -146,11 +148,15 @@ const VARSITY4 = ['blue', 'red', 'yellow', 'green'] as const;
 const SHELL2 = ['green', 'brown'] as const;
 const CARGO3 = ['green', 'brown', 'black'] as const;
 
-const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS };
+const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, idleAnimates: true };
 const SHARED_HEAD: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 // Released head accessories — art produced via the v4 head-band pipeline at 92px
 // (omit frameSize → defaults 92). Flip items to this as their art lands.
 const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
+// Released gendered tops — v4 diff pipeline reliably extracts only walk/idle for
+// torso garments (dynamic run/jump poses gap-flash); the engine falls back
+// run/jump -> walk. idleAnimates: clean breathing-idle bobs with the body.
+const TOP_RELEASED: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
 const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }; // frame 92
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };
@@ -162,56 +168,60 @@ const SHARED_AURA: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAn
 
 const RELEASED_ITEMS: ItemDef[] = [
   // ─── feet (gendered) ────────────────────────────────────────────────────
-  { id: 'beatup_sneakers', slot: 'feet', fitProfile: 'gendered', displayName: 'Beat-up Sneakers', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_black',  slot: 'feet', fitProfile: 'gendered', displayName: 'Black Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_blue',   slot: 'feet', fitProfile: 'gendered', displayName: 'Blue Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_green',  slot: 'feet', fitProfile: 'gendered', displayName: 'Green Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_pink',   slot: 'feet', fitProfile: 'gendered', displayName: 'Pink Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_red',    slot: 'feet', fitProfile: 'gendered', displayName: 'Red Sneakers',     rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'sneakers_yellow', slot: 'feet', fitProfile: 'gendered', displayName: 'Yellow Sneakers',  rarity: 'common', availableAnims: FULL_ANIMS },
+  { id: 'beatup_sneakers', slot: 'feet', fitProfile: 'gendered', displayName: 'Beat-up Sneakers', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_black',  slot: 'feet', fitProfile: 'gendered', displayName: 'Black Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_blue',   slot: 'feet', fitProfile: 'gendered', displayName: 'Blue Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_green',  slot: 'feet', fitProfile: 'gendered', displayName: 'Green Sneakers',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_pink',   slot: 'feet', fitProfile: 'gendered', displayName: 'Pink Sneakers',    rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_red',    slot: 'feet', fitProfile: 'gendered', displayName: 'Red Sneakers',     rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'sneakers_yellow', slot: 'feet', fitProfile: 'gendered', displayName: 'Yellow Sneakers',  rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
 
   // ─── head_accessory (shared) ────────────────────────────────────────────
   { id: 'wizard_hat', slot: 'head_accessory', fitProfile: 'shared', displayName: 'Wizard Hat', rarity: 'rare', frameSize: 132, availableAnims: ['walk', 'idle'] },
 
   // ─── lower_body (gendered) ──────────────────────────────────────────────
-  { id: 'blue_jeans',  slot: 'lower_body', fitProfile: 'gendered', displayName: 'Blue Jeans',  rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_black', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Black Jeans', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_brown', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Brown Jeans', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_green', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Green Jeans', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_grey',  slot: 'lower_body', fitProfile: 'gendered', displayName: 'Grey Jeans',  rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_khaki', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Khaki Jeans', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'jeans_red',   slot: 'lower_body', fitProfile: 'gendered', displayName: 'Red Jeans',   rarity: 'common', availableAnims: FULL_ANIMS },
+  { id: 'blue_jeans',  slot: 'lower_body', fitProfile: 'gendered', displayName: 'Blue Jeans',  rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_black', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Black Jeans', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_brown', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Brown Jeans', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_green', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Green Jeans', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_grey',  slot: 'lower_body', fitProfile: 'gendered', displayName: 'Grey Jeans',  rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_khaki', slot: 'lower_body', fitProfile: 'gendered', displayName: 'Khaki Jeans', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'jeans_red',   slot: 'lower_body', fitProfile: 'gendered', displayName: 'Red Jeans',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
 
   // ─── upper_body (gendered) ──────────────────────────────────────────────
-  { id: 'worn_tshirt',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Worn T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_black',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Black T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_blue',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Blue T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_brown',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Brown T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_green',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Green T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_pink',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Pink T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_purple',  slot: 'upper_body', fitProfile: 'gendered', displayName: 'Purple T-shirt',  rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_red',     slot: 'upper_body', fitProfile: 'gendered', displayName: 'Red T-shirt',     rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_stripes', slot: 'upper_body', fitProfile: 'gendered', displayName: 'Striped T-shirt', rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_white',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'White T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS },
-  { id: 'tshirt_yellow',  slot: 'upper_body', fitProfile: 'gendered', displayName: 'Yellow T-shirt',  rarity: 'common', availableAnims: FULL_ANIMS },
+  { id: 'worn_tshirt',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Worn T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_black',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Black T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_blue',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Blue T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_brown',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Brown T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_green',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'Green T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_pink',    slot: 'upper_body', fitProfile: 'gendered', displayName: 'Pink T-shirt',    rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_purple',  slot: 'upper_body', fitProfile: 'gendered', displayName: 'Purple T-shirt',  rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_red',     slot: 'upper_body', fitProfile: 'gendered', displayName: 'Red T-shirt',     rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_stripes', slot: 'upper_body', fitProfile: 'gendered', displayName: 'Striped T-shirt', rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_white',   slot: 'upper_body', fitProfile: 'gendered', displayName: 'White T-shirt',   rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
+  { id: 'tshirt_yellow',  slot: 'upper_body', fitProfile: 'gendered', displayName: 'Yellow T-shirt',  rarity: 'common', availableAnims: FULL_ANIMS, idleAnimates: true },
 ];
 
 // ─── New (unreleased) items — design/gdd/item-catalog.md §3 ──────────────────
 
 const UPPER_BODY_NEW: ItemDef[] = [
   ...colorFamily('longsleeve', 'upper_body', 'common', 'Long-sleeve Tee', TEE10, GENDERED_FULL),
-  ...colorFamily('hoodie', 'upper_body', 'uncommon', 'Hoodie', TEE10, GENDERED_FULL),
+  ...colorFamily('hoodie', 'upper_body', 'uncommon', 'Hoodie', HOODIE_COLORS, TOP_RELEASED),
   ...colorFamily('flannel', 'upper_body', 'uncommon', 'Flannel Shirt', FLANNEL3, GENDERED_FULL),
   ...colorFamily('varsity', 'upper_body', 'uncommon', 'Varsity Jacket', VARSITY4, GENDERED_FULL),
   ...colorFamily('puffer', 'upper_body', 'rare', 'Puffer Jacket', TEE10, GENDERED_FULL),
+  // signature colorway of the 2026-07 new-bar batch (not in TEE10)
+  mk('puffer_orange', 'upper_body', 'rare', 'Orange Puffer Jacket', GENDERED_FULL),
   mk('lab_coat', 'upper_body', 'rare', 'Scientist Coat', GENDERED_FULL),
-  mk('leather_jacket', 'upper_body', 'rare', 'Leather Jacket', GENDERED_FULL),
+  mk('leather_jacket', 'upper_body', 'rare', 'Brown Leather Jacket', TOP_RELEASED),
+  mk('leather_black', 'upper_body', 'rare', 'Black Leather Jacket', TOP_RELEASED),
+  mk('leather_green', 'upper_body', 'rare', 'Green Jacket', TOP_RELEASED),
   mk('pinned_denim_vest', 'upper_body', 'rare', 'Pinned Denim Vest', GENDERED_FULL),
-  mk('rune_cloak', 'upper_body', 'epic', 'Rune Cloak', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS }),
+  mk('rune_cloak', 'upper_body', 'epic', 'Rune Cloak', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
   mk('circuit_jacket', 'upper_body', 'epic', 'Neon Circuit Jacket', GENDERED_FULL),
   mk('galaxy_hoodie', 'upper_body', 'legendary', 'Galaxy Hoodie', GENDERED_FULL),
-  mk('shark_onesie', 'upper_body', 'crazy', 'Shark Onesie', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS }),
-  mk('trex_costume_top', 'upper_body', 'crazy', 'Inflatable T-Rex Top', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS }),
+  mk('shark_onesie', 'upper_body', 'crazy', 'Shark Onesie', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
+  mk('trex_costume_top', 'upper_body', 'crazy', 'Inflatable T-Rex Top', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
 ];
 
 const LOWER_BODY_NEW: ItemDef[] = [
@@ -243,7 +253,7 @@ const FEET_NEW: ItemDef[] = [
   mk('futuristic_sneakers', 'feet', 'epic', 'Futuristic Sneakers', GENDERED_FULL),
   mk('rocket_boots', 'feet', 'epic', 'Rocket Boots', GENDERED_FULL),
   mk('winged_sandals', 'feet', 'legendary', 'Winged Sandals', GENDERED_FULL),
-  mk('giant_clown_shoes', 'feet', 'crazy', 'Giant Clown Shoes', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS }),
+  mk('giant_clown_shoes', 'feet', 'crazy', 'Giant Clown Shoes', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
 ];
 
 const HEAD_NEW: ItemDef[] = [

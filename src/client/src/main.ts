@@ -16,6 +16,11 @@ const config: Phaser.Types.Core.GameConfig = {
   height: 720,
   backgroundColor: '#0a0a18',
   parent: 'game',
+  // Crisp pixel art: without this Phaser bilinear-filters every sprite —
+  // at the 0.75 character scale all garment/face edges smear into mush,
+  // which is why cosmetics looked far worse in-game than in the sheets.
+  pixelArt: true,
+  roundPixels: true,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -24,5 +29,13 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 const game = new Phaser.Game(config);
+// pixelArt:true keeps TEXTURE sampling crisp (no more bilinear mush on
+// sprites), but it also sets image-rendering:pixelated on the canvas — and
+// the FIT scale to a monitor is almost never an integer factor, so the final
+// upscale doubles every Nth pixel: chunky, uneven, jagged. Smooth ONLY the
+// final canvas upscale; internal rendering stays crisp.
+game.events.once(Phaser.Core.Events.READY, () => {
+  game.canvas.style.imageRendering = 'auto';
+});
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;

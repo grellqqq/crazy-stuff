@@ -238,20 +238,30 @@ COLORS = {
 
 def main():
     global BODY
-    # Parse --body <male|female> (default male).
+    # Parse --body <male|female>. With NO --body, process BOTH bodies — the old
+    # default of male-only silently shipped STALE female colour variants when a
+    # re-extract forgot the flag (the "colours over the head" female bug).
     args = sys.argv[1:]
+    explicit = None
     i = 0
     while i < len(args):
         a = args[i]
         if a == "--body":
-            BODY = args[i + 1]; i += 2
+            explicit = args[i + 1]; i += 2
         elif a.startswith("--body="):
-            BODY = a.split("=", 1)[1]; i += 1
+            explicit = a.split("=", 1)[1]; i += 1
         else:
             i += 1
+    for b in ([explicit] if explicit else ["male", "female"]):
+        BODY = b
+        _process_body()
 
+
+def _process_body():
+    global BODY
     # Source overlays for this body — the base variants we recolor from.
     TSHIRT_SRC   = EQUIP_ROOT / "upper_body" / "worn_tshirt"     / BODY
+    HOODIE_SRC   = EQUIP_ROOT / "upper_body" / "worn_hoodie"     / BODY
     JEANS_SRC    = EQUIP_ROOT / "lower_body" / "blue_jeans"      / BODY
     SNEAKERS_SRC = EQUIP_ROOT / "feet"       / "beatup_sneakers" / BODY
 
@@ -278,6 +288,40 @@ def main():
     # game never loads them. Generation removed so orphan sprite dirs stop
     # reappearing. To ship them: add catalog entries first, then restore
     # generate_variant calls using make_tiedye_pattern / make_digital_camo_pattern.
+
+    # HOODIES — grey base hoodie (worn_hoodie) recolored to the TEE10 family,
+    # exactly mirroring the t-shirt block. Skipped if the grey base overlays
+    # for this body have not been extracted yet.
+    if HOODIE_SRC.is_dir() and any(HOODIE_SRC.glob("*.png")):
+        print("Hoodies:")
+        for name, (h, s) in COLORS.items():
+            generate_variant(HOODIE_SRC, f"hoodie_{name}", "upper_body",
+                             lambda fr, h=h, s=s: colorize_image(fr, h, s))
+        # Desaturate BEFORE toning: the greygarment gate admits some faintly-warm
+        # edge pixels; tone preserves hue, so a plain lighten turns them pink/red
+        # (and darken → maroon). colorize(0,0) zeroes saturation first.
+        generate_variant(HOODIE_SRC, "hoodie_black", "upper_body",
+                         lambda fr: tone_image(colorize_image(fr, 0.0, 0.0), lightness_mul=0.35))
+        generate_variant(HOODIE_SRC, "hoodie_white", "upper_body",
+                         lambda fr: tone_image(colorize_image(fr, 0.0, 0.0), lightness_mul=1.0, lightness_add=0.35))
+    else:
+        print(f"Hoodies: SKIP (no grey base overlays at {HOODIE_SRC})")
+
+    # LEATHER JACKETS — the extracted brown biker jacket (leather_jacket)
+    # recoloured. Luminance preserved so the silver studs/zipper stay bright.
+    LEATHER_SRC = EQUIP_ROOT / "upper_body" / "leather_jacket" / BODY
+    if LEATHER_SRC.is_dir() and any(LEATHER_SRC.glob("*.png")):
+        print("Leather jackets:")
+        # Black: desaturate the warm brown to zero, then darken hard — studs
+        # (already high-lum/low-sat) stay a light grey against the black hide.
+        generate_variant(LEATHER_SRC, "leather_black", "upper_body",
+                         lambda fr: tone_image(colorize_image(fr, 0.0, 0.0), lightness_mul=0.42))
+        # Green: shift the brown hide to a deep forest green (studs keep their
+        # value). Named "Green Jacket" in the catalog.
+        generate_variant(LEATHER_SRC, "leather_green", "upper_body",
+                         lambda fr: colorize_image(fr, 0.33, 0.50))
+    else:
+        print(f"Leather: SKIP (no leather_jacket overlays at {LEATHER_SRC})")
 
     # JEANS / PANTS
     print("Pants:")

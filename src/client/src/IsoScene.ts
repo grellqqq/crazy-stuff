@@ -199,6 +199,21 @@ export class IsoScene extends Phaser.Scene {
     return c && PL_CHAR_KEYS.includes(c) ? c : null;
   })();
 
+  /**
+   * Sprite-sheet cache-buster for EVERY dev-server session (any local dev
+   * port), not just `?dev` tabs. Art is regenerated on disk constantly during
+   * iteration; a tab opened WITHOUT `?dev` used stable URLs, so the browser's
+   * HTTP cache kept serving stale PNGs — and because the fetch itself was
+   * cached, even texture purges refetched the SAME stale bytes ("art fixes
+   * silently never show up"). Production URLs stay clean/cacheable.
+   */
+  private static devCacheBust(): string {
+    const port = window.location.port;
+    const isDev = ['5173', '5174', '8080', '8081', '8082', '8083'].includes(port)
+      || new URLSearchParams(window.location.search).has('dev');
+    return isDev ? `?v=${Date.now()}` : '';
+  }
+
   private playerFacing = 'SD';
 
   private avatars = new Map<number, AvatarData>();
@@ -1245,7 +1260,7 @@ export class IsoScene extends Phaser.Scene {
 
     if (!this.loadingChars.has(charKey)) {
       this.loadingChars.add(charKey);
-      const bust = new URLSearchParams(window.location.search).has('dev') ? `?v=${Date.now()}` : '';
+      const bust = IsoScene.devCacheBust();
       for (const dir of PL_BODY_DIRS) {
         const base = `/sprites/characters/${charKey}`;
         this.load.spritesheet(`${charKey}_${dir}`, `${base}/walk_${dir}.png${bust}`, { frameWidth: 92, frameHeight: 92 });
@@ -1398,8 +1413,7 @@ export class IsoScene extends Phaser.Scene {
       // Dev cache-buster: sprite sheets are regenerated on disk during art
       // iteration; without this the browser serves stale cached PNGs and
       // art fixes silently "don't show up".
-      const bust = new URLSearchParams(window.location.search).has('dev')
-        ? `?v=${Date.now()}` : '';
+      const bust = IsoScene.devCacheBust();
       for (const dir of PL_DIRS_LIST) {
         const basePath = `/sprites/equipment/${slot}/${itemId}/${eqBody}`;
         if (availableAnims.includes('walk'))
@@ -1695,6 +1709,17 @@ export class IsoScene extends Phaser.Scene {
 
       equipSprite.setFlipX(mapping.flipX);
       equipSprite.setTint(tint);
+
+      // Guard against the "huge sprite pop": if an animation/texture churn leaves
+      // the sprite on a null or full-spritesheet frame, Phaser sizes it to the
+      // WHOLE sheet (e.g. 828px wide) and it renders as a giant block. A single
+      // equipment frame is always square (width ~= height). If the current frame
+      // is far from square (sheet leaked in), hide the layer for this frame — it
+      // self-corrects next frame once the proper frame is set.
+      const fr = equipSprite.frame;
+      if (fr && fr.width > fr.height * 1.5) {
+        equipSprite.setVisible(false);
+      }
     }
   }
 
