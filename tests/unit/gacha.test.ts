@@ -126,3 +126,56 @@ test('AC7 — free pull resets on the UTC day boundary', () => {
   // nextFreeAt points at the upcoming UTC midnight.
   assert.equal(nextMidnightUTC(lateYesterday).toISOString(), '2026-06-14T00:00:00.000Z');
 });
+
+// ─── Admin override (gacha_config) ───────────────────────────────────────────
+
+import {
+  buildPool as buildPoolOv, computeOdds as computeOddsOv,
+  resolveTierWeights, sanitizeGachaOverride,
+} from '../../src/shared/gacha.ts';
+
+const OV_ITEMS: Record<string, ItemDef> = {
+  a: { id: 'a', slot: 'upper_body', fitProfile: 'shared', displayName: 'a', rarity: 'common' },
+  b: { id: 'b', slot: 'upper_body', fitProfile: 'shared', displayName: 'b', rarity: 'common' },
+  c: { id: 'c', slot: 'upper_body', fitProfile: 'shared', displayName: 'c', rarity: 'rare' },
+  u: { id: 'u', slot: 'upper_body', fitProfile: 'shared', displayName: 'u', rarity: 'epic', released: false },
+};
+
+test('override — enabled:false pulls a released item out of the pool', () => {
+  const pool = buildPoolOv(OV_ITEMS, { itemOverrides: { a: { enabled: false } } });
+  assert.deepEqual(pool.common.map((i) => i.id), ['b']); // a removed, u never in (unreleased)
+  assert.equal(pool.rare.length, 1);
+});
+
+test('override — rarity remap moves an item to another tier', () => {
+  const pool = buildPoolOv(OV_ITEMS, { itemOverrides: { c: { rarity: 'crazy' } } });
+  assert.equal(pool.rare.length, 0);
+  assert.deepEqual(pool.crazy.map((i) => i.id), ['c']);
+});
+
+test('override — cannot force an UNRELEASED item into the pool', () => {
+  const pool = buildPoolOv(OV_ITEMS, { itemOverrides: { u: { enabled: true, rarity: 'common' } } });
+  assert.ok(!pool.common.some((i) => i.id === 'u'));
+  assert.ok(!Object.values(pool).flat().some((i) => i.id === 'u'));
+});
+
+test('override — custom tier weights change the odds', () => {
+  const pool = buildPoolOv(OV_ITEMS); // 2 common, 1 rare
+  const weights = resolveTierWeights({ tierWeights: { common: 10, rare: 90 } });
+  const odds = computeOddsOv(pool, 'common', weights);
+  assert.ok(Math.abs((odds.common ?? 0) - 10 / 100) < 1e-9);
+  assert.ok(Math.abs((odds.rare ?? 0) - 90 / 100) < 1e-9);
+});
+
+test('sanitize — drops negative/NaN weights and unknown rarities', () => {
+  const clean = sanitizeGachaOverride({
+    tierWeights: { common: -5, rare: 20, bogus: 3, epic: NaN },
+    itemOverrides: { a: { rarity: 'nonsense', enabled: false }, b: { rarity: 'epic' } },
+  });
+  assert.equal(clean.tierWeights?.common, undefined); // negative dropped
+  assert.equal(clean.tierWeights?.rare, 20);
+  assert.equal((clean.tierWeights as Record<string, number>).bogus, undefined);
+  assert.equal(clean.itemOverrides?.a?.rarity, undefined); // bad rarity dropped
+  assert.equal(clean.itemOverrides?.a?.enabled, false);    // valid enabled kept
+  assert.equal(clean.itemOverrides?.b?.rarity, 'epic');
+});

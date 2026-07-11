@@ -208,18 +208,23 @@ const UPPER_BODY_NEW: ItemDef[] = [
   ...colorFamily('longsleeve', 'upper_body', 'common', 'Long-sleeve Tee', TEE10, GENDERED_FULL),
   ...colorFamily('hoodie', 'upper_body', 'uncommon', 'Hoodie', HOODIE_COLORS, TOP_RELEASED),
   ...colorFamily('flannel', 'upper_body', 'uncommon', 'Flannel Shirt', FLANNEL3, GENDERED_FULL),
-  ...colorFamily('varsity', 'upper_body', 'uncommon', 'Varsity Jacket', VARSITY4, GENDERED_FULL),
-  ...colorFamily('puffer', 'upper_body', 'rare', 'Puffer Jacket', TEE10, GENDERED_FULL),
-  // signature colorway of the 2026-07 new-bar batch (not in TEE10)
-  mk('puffer_orange', 'upper_body', 'rare', 'Orange Puffer Jacket', GENDERED_FULL),
+  // Varsity (rare): red/green/blue have art (released); yellow stays an
+  // unreleased placeholder until its art lands.
+  ...colorFamily('varsity', 'upper_body', 'rare', 'Varsity Jacket', ['yellow'], GENDERED_FULL),
+  ...colorFamily('varsity', 'upper_body', 'rare', 'Varsity Jacket', ['red', 'green', 'blue'], TOP_RELEASED),
+  // Puffer (rare): orange + blue/green/purple/red/pink released; the rest stay
+  // unreleased placeholders until their art lands.
+  ...colorFamily('puffer', 'upper_body', 'rare', 'Puffer Jacket', ['black', 'brown', 'stripes', 'white', 'yellow'], GENDERED_FULL),
+  ...colorFamily('puffer', 'upper_body', 'rare', 'Puffer Jacket', ['blue', 'green', 'purple', 'red', 'pink'], TOP_RELEASED),
+  mk('puffer_orange', 'upper_body', 'rare', 'Orange Puffer Jacket', TOP_RELEASED),
   mk('lab_coat', 'upper_body', 'rare', 'Scientist Coat', GENDERED_FULL),
   mk('leather_jacket', 'upper_body', 'rare', 'Brown Leather Jacket', TOP_RELEASED),
   mk('leather_black', 'upper_body', 'rare', 'Black Leather Jacket', TOP_RELEASED),
   mk('leather_green', 'upper_body', 'rare', 'Green Jacket', TOP_RELEASED),
   mk('pinned_denim_vest', 'upper_body', 'rare', 'Pinned Denim Vest', GENDERED_FULL),
   mk('rune_cloak', 'upper_body', 'epic', 'Rune Cloak', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
-  mk('circuit_jacket', 'upper_body', 'epic', 'Neon Circuit Jacket', GENDERED_FULL),
-  mk('galaxy_hoodie', 'upper_body', 'legendary', 'Galaxy Hoodie', GENDERED_FULL),
+  mk('circuit_jacket', 'upper_body', 'epic', 'Neon Circuit Jacket', TOP_RELEASED),
+  mk('galaxy_hoodie', 'upper_body', 'legendary', 'Galaxy Hoodie', TOP_RELEASED),
   mk('shark_onesie', 'upper_body', 'crazy', 'Shark Onesie', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
   mk('trex_costume_top', 'upper_body', 'crazy', 'Inflatable T-Rex Top', { fitProfile: 'gendered', frameSize: 132, availableAnims: FULL_ANIMS, idleAnimates: true }),
 ];
@@ -266,7 +271,7 @@ const HEAD_NEW: ItemDef[] = [
   mk('beret', 'head_accessory', 'uncommon', 'Beret', HEAD_RELEASED),
   mk('top_hat', 'head_accessory', 'rare', 'Top Hat', HEAD_RELEASED),
   mk('bay_leaf_crown', 'head_accessory', 'rare', 'Bay Leaf Crown', HEAD_RELEASED),
-  mk('beer_can_cap', 'head_accessory', 'rare', 'Beer-can Cap', HEAD_RELEASED),
+  mk('beer_can_cap', 'head_accessory', 'epic', 'Beer-can Cap', HEAD_RELEASED),
   mk('helicopter_cap', 'head_accessory', 'rare', 'Helicopter Cap', HEAD_RELEASED),
   mk('tiara', 'head_accessory', 'epic', 'Tiara', HEAD_RELEASED),
   mk('halo', 'head_accessory', 'epic', 'Halo', HEAD_RELEASED),

@@ -5,7 +5,8 @@ import { currentSeasonId } from '../../../shared/season';
 import { storePrice, inStorePool, STORE_SIZE } from '../../../shared/store';
 import {
   buildPool, pullBatch, computeOdds, cryptoRng, GACHA_CONFIG, RARITIES,
-  freeAvailable, nextMidnightUTC,
+  freeAvailable, nextMidnightUTC, sanitizeGachaOverride, resolveTierWeights,
+  GachaOverride,
 } from '../../../shared/gacha';
 
 const MONGODB_URI = process.env.MONGODB_URI ?? '';
@@ -662,11 +663,34 @@ export class GachaError extends Error {
   constructor(public code: string) { super(code); this.name = 'GachaError'; }
 }
 
+/**
+ * Admin-tunable gacha override (Mongo `gacha_config` doc `_id:'active'`, set by
+ * the dashboard). Cached briefly so a burst of pulls does not hammer Mongo; a
+ * dashboard edit takes effect within GACHA_CFG_TTL. Any read error or bad doc
+ * falls back to the hardcoded defaults — a broken config never blocks pulls.
+ */
+const GACHA_CFG_TTL = 5000;
+let gachaCfgCache: { at: number; override: GachaOverride } | null = null;
+
+async function loadGachaOverride(): Promise<GachaOverride> {
+  const now = Date.now();
+  if (gachaCfgCache && now - gachaCfgCache.at < GACHA_CFG_TTL) return gachaCfgCache.override;
+  let override: GachaOverride = {};
+  try {
+    const doc = await db.collection('gacha_config').findOne({ _id: 'active' as never });
+    if (doc) override = sanitizeGachaOverride(doc);
+  } catch { /* keep defaults */ }
+  gachaCfgCache = { at: now, override };
+  return override;
+}
+
 /** Public odds disclosure (gacha GDD §3.1, edge case 3): renormalized tier
- *  probabilities over the live catalog, plus item counts per tier. */
-export function getGachaOdds() {
-  const pool = buildPool();
-  const odds = computeOdds(pool);
+ *  probabilities over the live catalog (with admin overrides), plus item
+ *  counts per tier. */
+export async function getGachaOdds() {
+  const override = await loadGachaOverride();
+  const pool = buildPool(ITEMS, override);
+  const odds = computeOdds(pool, 'common', resolveTierWeights(override));
   const tiers = RARITIES.map((r) => ({
     rarity: r,
     count: pool[r].length,
@@ -735,9 +759,13 @@ export async function executePull(userId: string, pullId: string, req: PullReque
         funding = 'credits';
       }
 
-      const pool = buildPool();
+      const override = await loadGachaOverride();
+      const pool = buildPool(ITEMS, override);
       const pityBefore = player.pityCounter ?? 0;
-      const outcome = pullBatch({ pool, count, pityCounter: pityBefore, rng: cryptoRng });
+      const outcome = pullBatch({
+        pool, count, pityCounter: pityBefore, rng: cryptoRng,
+        tierWeights: resolveTierWeights(override),
+      });
 
       // Grant items (gacha-sourced; never auto-equipped — player chooses).
       const rows = outcome.results.map((r) => ({

@@ -77,7 +77,8 @@ ITEMS = {
                         "anims": ["idle", "walk", "run", "jump"],
                         "band_run": (14, 76), "band_jump": (6, 78), "align": True,
                         "synth_sleeves": True, "synth_tone": (176, 236),
-                        "synth_warm": 1, "clip_face": True, "ai_lock": False},
+                        "synth_warm": 1, "clip_head": True, "debleed": True,
+                        "ai_lock": False},
     "circuit_jacket":  {"slot": "upper_body", "band": (20, 76), "diff_min": 30,
                         "gate": "noskin", "fill_holes": True,
                         "anims": ["idle", "walk", "run", "jump"],
@@ -95,7 +96,8 @@ ITEMS = {
                         "anims": ["idle", "walk", "run", "jump"],
                         "band_run": (14, 76), "band_jump": (6, 78), "align": True,
                         "synth_sleeves": True, "synth_tone": (150, 220),
-                        "synth_warm": 14, "clip_face": True, "ai_lock": False},
+                        "synth_warm": 14, "clip_head": True, "debleed": True,
+                        "ai_lock": False},
     # REGENERATED 2026-07-08 as a new-bar item (like circuit/galaxy hoodies):
     # full dressed grey-hoodie template states, per-frame extraction. Replaces
     # the old transfer-pipeline + AI-LOCK recipe whose one-frame design-lock

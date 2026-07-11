@@ -51,6 +51,29 @@ def colorize_image(img: Image.Image, target_h: float, target_s: float) -> Image.
     return out
 
 
+def recolor_saturated_image(img: Image.Image, target_h: float, target_s: float,
+                            sat_min: float = 0.22) -> Image.Image:
+    """Hue-shift ONLY the coloured pixels (saturation >= sat_min), preserving
+    each pixel's lightness. Low-saturation pixels (white sleeves/ribbing, black
+    trim, greys) are left untouched — so a red varsity's white sleeves stay
+    white when the body recolours to green/blue. For a single-colour garment
+    (puffer) it behaves like a clean hue swap that keeps the dark collar dark."""
+    out = img.copy().convert("RGBA")
+    px = out.load()
+    w, h = out.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            hh, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+            if s < sat_min:
+                continue
+            nr, ng, nb = colorsys.hls_to_rgb(target_h, l, target_s)
+            px[x, y] = (int(nr * 255), int(ng * 255), int(nb * 255), a)
+    return out
+
+
 def tone_image(img: Image.Image, lightness_mul: float, lightness_add: float = 0.0) -> Image.Image:
     """Shift luminance without touching hue/sat — for black/white variants."""
     out = img.copy().convert("RGBA")
@@ -322,6 +345,31 @@ def _process_body():
                          lambda fr: colorize_image(fr, 0.33, 0.50))
     else:
         print(f"Leather: SKIP (no leather_jacket overlays at {LEATHER_SRC})")
+
+    # PUFFER JACKETS — the orange puffer (puffer_orange) hue-swapped to new
+    # colourways; the dark collar/trim (low saturation) is preserved.
+    PUFFER_SRC = EQUIP_ROOT / "upper_body" / "puffer_orange" / BODY
+    if PUFFER_SRC.is_dir() and any(PUFFER_SRC.glob("*.png")):
+        print("Puffers:")
+        for name, (h, s) in [("blue", (0.60, 0.70)), ("green", (0.33, 0.58)),
+                             ("purple", (0.77, 0.55)), ("red", (0.00, 0.72)),
+                             ("pink", (0.92, 0.60))]:
+            generate_variant(PUFFER_SRC, f"puffer_{name}", "upper_body",
+                             lambda fr, h=h, s=s: recolor_saturated_image(fr, h, s))
+    else:
+        print(f"Puffers: SKIP (no puffer_orange overlays at {PUFFER_SRC})")
+
+    # VARSITY JACKETS — the red varsity (varsity_red) body recoloured; the white
+    # sleeves/ribbing (low saturation) stay white, so it reads as a proper
+    # two-tone varsity in each colour.
+    VARSITY_SRC = EQUIP_ROOT / "upper_body" / "varsity_red" / BODY
+    if VARSITY_SRC.is_dir() and any(VARSITY_SRC.glob("*.png")):
+        print("Varsity:")
+        for name, (h, s) in [("green", (0.33, 0.58)), ("blue", (0.60, 0.70))]:
+            generate_variant(VARSITY_SRC, f"varsity_{name}", "upper_body",
+                             lambda fr, h=h, s=s: recolor_saturated_image(fr, h, s))
+    else:
+        print(f"Varsity: SKIP (no varsity_red overlays at {VARSITY_SRC})")
 
     # JEANS / PANTS
     print("Pants:")

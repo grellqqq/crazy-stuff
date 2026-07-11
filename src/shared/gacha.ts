@@ -41,6 +41,67 @@ export const GACHA_CONFIG = {
   freePullsPerDay: 1,
 } as const;
 
+// ─── Admin-tunable override (persisted in Mongo `gacha_config`) ──────────────
+
+/** Per-item tuning the admin dashboard can set. `enabled:false` pulls a
+ *  released item OUT of the pool; `rarity` moves it to a different tier. */
+export interface ItemOverride {
+  rarity?: Rarity;
+  enabled?: boolean;
+}
+
+/** The full admin override document (all fields optional → fall back to the
+ *  hardcoded GACHA_CONFIG / catalog defaults). */
+export interface GachaOverride {
+  tierWeights?: Partial<Record<Rarity, number>>;
+  itemOverrides?: Record<string, ItemOverride>;
+}
+
+/** Effective tier weights = code defaults merged with any valid overrides.
+ *  Invalid entries (negative, NaN, unknown tier) are ignored, never trusted. */
+export function resolveTierWeights(override?: GachaOverride): Record<Rarity, number> {
+  const w = { ...GACHA_CONFIG.tierWeights };
+  const ov = override?.tierWeights;
+  if (ov) {
+    for (const r of RARITIES) {
+      const v = ov[r];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) w[r] = v;
+    }
+  }
+  return w;
+}
+
+/** Coerce an untrusted Mongo document into a safe GachaOverride. Real money
+ *  rides on the roll, so the server sanitizes before ever using the config. */
+export function sanitizeGachaOverride(raw: unknown): GachaOverride {
+  const out: GachaOverride = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const r = raw as Record<string, unknown>;
+  if (r.tierWeights && typeof r.tierWeights === 'object') {
+    const tw: Partial<Record<Rarity, number>> = {};
+    for (const rar of RARITIES) {
+      const v = (r.tierWeights as Record<string, unknown>)[rar];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) tw[rar] = v;
+    }
+    out.tierWeights = tw;
+  }
+  if (r.itemOverrides && typeof r.itemOverrides === 'object') {
+    const io: Record<string, ItemOverride> = {};
+    for (const [id, val] of Object.entries(r.itemOverrides as Record<string, unknown>)) {
+      if (!val || typeof val !== 'object') continue;
+      const v = val as Record<string, unknown>;
+      const o: ItemOverride = {};
+      if (typeof v.rarity === 'string' && (RANK as Record<string, number>)[v.rarity] !== undefined) {
+        o.rarity = v.rarity as Rarity;
+      }
+      if (typeof v.enabled === 'boolean') o.enabled = v.enabled;
+      if (o.rarity !== undefined || o.enabled !== undefined) io[id] = o;
+    }
+    out.itemOverrides = io;
+  }
+  return out;
+}
+
 export type RNG = () => number; // uniform in [0, 1)
 
 export interface PullResult {
@@ -59,13 +120,23 @@ export type Pool = Record<Rarity, ItemDef[]>;
 
 // ─── Pool & odds ──────────────────────────────────────────────────────────
 
-/** Group the gacha-eligible catalog into a per-rarity pool. */
-export function buildPool(items: Record<string, ItemDef> = ITEMS): Pool {
+/**
+ * Group the gacha-eligible catalog into a per-rarity pool. An optional admin
+ * override may DISABLE a released item (`enabled:false` → skipped) or reassign
+ * its tier (`rarity`). It can never force an UNRELEASED item into the pool —
+ * `inGachaPool` still gates on art existing, so a bad override can't award an
+ * item with no sprites.
+ */
+export function buildPool(items: Record<string, ItemDef> = ITEMS, override?: GachaOverride): Pool {
   const pool = {
     common: [], uncommon: [], rare: [], epic: [], legendary: [], crazy: [],
   } as Pool;
+  const ov = override?.itemOverrides;
   for (const item of Object.values(items)) {
-    if (inGachaPool(item)) pool[item.rarity].push(item);
+    if (!inGachaPool(item)) continue;
+    const o = ov?.[item.id];
+    if (o?.enabled === false) continue;
+    pool[o?.rarity ?? item.rarity].push(item);
   }
   return pool;
 }
@@ -79,12 +150,16 @@ function nonEmptyTiers(pool: Pool, floor: Rarity = 'common'): Rarity[] {
  * F1 — renormalized tier probabilities over non-empty tiers at or above
  * `floor`. Returns an empty object when no tier qualifies (caller falls back).
  */
-export function computeOdds(pool: Pool, floor: Rarity = 'common'): Partial<Record<Rarity, number>> {
+export function computeOdds(
+  pool: Pool,
+  floor: Rarity = 'common',
+  weights: Record<Rarity, number> = GACHA_CONFIG.tierWeights,
+): Partial<Record<Rarity, number>> {
   const tiers = nonEmptyTiers(pool, floor);
-  const total = tiers.reduce((s, r) => s + GACHA_CONFIG.tierWeights[r], 0);
+  const total = tiers.reduce((s, r) => s + weights[r], 0);
   if (total <= 0) return {};
   const odds: Partial<Record<Rarity, number>> = {};
-  for (const r of tiers) odds[r] = GACHA_CONFIG.tierWeights[r] / total;
+  for (const r of tiers) odds[r] = weights[r] / total;
   return odds;
 }
 
@@ -122,11 +197,13 @@ export function pullBatch(opts: {
   count: number;
   pityCounter: number;
   rng: RNG;
+  tierWeights?: Record<Rarity, number>;
 }): BatchOutcome {
   const { pool, count, rng } = opts;
-  const baseOdds = computeOdds(pool);
-  const pityOdds = computeOdds(pool, GACHA_CONFIG.pityFloor);
-  const guaranteeOdds = computeOdds(pool, GACHA_CONFIG.tenPullGuaranteeFloor);
+  const weights = opts.tierWeights ?? GACHA_CONFIG.tierWeights;
+  const baseOdds = computeOdds(pool, 'common', weights);
+  const pityOdds = computeOdds(pool, GACHA_CONFIG.pityFloor, weights);
+  const guaranteeOdds = computeOdds(pool, GACHA_CONFIG.tenPullGuaranteeFloor, weights);
   const epicPlusExists = Object.keys(pityOdds).length > 0;
 
   let pity = opts.pityCounter;

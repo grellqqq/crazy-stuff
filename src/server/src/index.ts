@@ -65,9 +65,9 @@ app.get('/ready', async (_req, res) => {
 
 // Public gacha odds disclosure (no auth — catalog-derived, shown on the pull
 // screen). Gacha GDD §3.1 / AC10.
-app.get('/api/gacha/odds', (_req, res) => {
+app.get('/api/gacha/odds', async (_req, res) => {
   try {
-    res.json(getGachaOdds());
+    res.json(await getGachaOdds());
   } catch (e) {
     console.error('[API] gacha odds error:', e);
     res.status(500).json({ error: 'db error' });
