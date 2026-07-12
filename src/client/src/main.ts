@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { TitleScene } from './TitleScene';
 import { LobbyScene } from './LobbyScene';
 import { IsoScene } from './IsoScene';
+import { installVolumeControl } from './volumeControl';
 
 // Dev mode: add ?dev to URL to skip login and go straight to race.
 // Lobby preview: add ?lobby to boot straight into the lobby (no server/login
@@ -37,5 +38,7 @@ const game = new Phaser.Game(config);
 game.events.once(Phaser.Core.Events.READY, () => {
   game.canvas.style.imageRendering = 'auto';
 });
+// Global audio control — persists across every scene (title → lobby → race).
+installVolumeControl(game);
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;

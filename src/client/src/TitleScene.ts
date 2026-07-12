@@ -42,6 +42,27 @@ export class TitleScene extends Phaser.Scene {
     this.bgMusic = this.sound.add('title_theme', { loop: true, volume: 0.5 });
     try { this.bgMusic.play(); } catch { /* ignore */ }
 
+    // Intro skip: FIRST-TIME players watch the full title sequence; RETURNING
+    // players (flagged in localStorage) can skip it immediately with any key or
+    // click. The flag is set the first time through, so the very first visit is
+    // never skippable, every visit after is.
+    let introSeen = false;
+    try {
+      introSeen = localStorage.getItem('cs_intro_seen') === '1';
+      localStorage.setItem('cs_intro_seen', '1');
+    } catch { /* storage blocked (private mode) — treat as first-time */ }
+    if (introSeen) {
+      const hint = this.add.text(width / 2, height - 28, 'Press any key to skip', {
+        fontSize: '16px', fontFamily: 'monospace', color: '#777777',
+      }).setOrigin(0.5, 0.5).setDepth(1000);
+      this.tweens.add({
+        targets: hint, alpha: 0.35, duration: 900, yoyo: true, repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.input.keyboard?.once('keydown', () => this.startGame());
+      this.input.once('pointerdown', () => this.startGame());
+    }
+
     // Phase 1: Draw thick pipe frames + fireworks
     this.pipeGraphics = this.add.graphics();
     const pipeEndTime = this.animatePipeFrame(width, height);
