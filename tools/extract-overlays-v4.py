@@ -157,6 +157,21 @@ ITEMS = {
                         "gate": "noskin", "anims": ["idle", "walk"]},
     "traffic_cone_hat":{"slot": "head_accessory", "band": (0, 28), "diff_min": 28,
                         "gate": "noskin", "anims": ["idle", "walk"]},
+    # FACE ACCESSORIES — same diff pipeline as hats, band on the EYE rows
+    # (face_region is rows 19-31; eyes ~19-26). noskin gate keeps the lens/
+    # frame, rejects the face skin behind it.
+    "sunglasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 22,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "round_glasses":   {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "aviators":        {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "nerd_glasses":    {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "3d_glasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "eyepatch":        {"slot": "eyes_accessory", "band": (17, 29), "diff_min": 22,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
@@ -881,6 +896,23 @@ def finish_overlay(fr, base, anim, cfg):
         fr[face_region(base)] = 0     # also the face below the chin cap (jump)
     elif cfg.get("clip_face"):
         fr[face_region(base)] = 0
+    # FACE_ONLY — for eyewear/masks/mouth items: keep the overlay ONLY where the
+    # face is actually visible (a few px of dilation for frames/temples). On
+    # back views the face isn't visible (empty face_region) so the whole frame
+    # is cleared — kills the spurious dark band the diff otherwise leaves on the
+    # back of the head, and trims stray hair fringe above the lenses.
+    if cfg.get("face_only"):
+        frg = face_region(base)
+        if frg.any():
+            dil = frg.copy()
+            for k in range(1, 4):
+                dil[:, k:] |= frg[:, :-k]
+                dil[:, :-k] |= frg[:, k:]
+                dil[k:, :] |= frg[:-k, :]
+                dil[:-k, :] |= frg[k:, :]
+            fr[~dil] = 0
+        else:
+            fr[:] = 0
     if cfg.get("synth_sleeves"):
         fr[hand_zone(base, deep=(anim == "jump"))] = 0
         ys_b, _ = np.nonzero(base[..., 3] > 8)

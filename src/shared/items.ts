@@ -158,6 +158,9 @@ const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS
 // run/jump -> walk. idleAnimates: clean breathing-idle bobs with the body.
 const TOP_RELEASED: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
 const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }; // frame 92
+// Released face accessory (eyes/mouth/face) — 92px shared overlay via the
+// head-band pipeline (face-band diff + face_only clip). idleAnimates: bobs with the head.
+const FACE_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };
 const SHARED_AURA: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
@@ -329,12 +332,12 @@ const AIR_SPACE_NEW: ItemDef[] = [
 ];
 
 const EYES_NEW: ItemDef[] = [
-  mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', SHARED_FACE),
-  mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', SHARED_FACE),
-  mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', SHARED_FACE),
-  mk('aviators', 'eyes_accessory', 'uncommon', 'Aviators', SHARED_FACE),
-  mk('eyepatch', 'eyes_accessory', 'uncommon', 'Eyepatch', SHARED_FACE),
-  mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', SHARED_FACE),
+  mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', FACE_RELEASED),
+  mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', FACE_RELEASED),
+  mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', FACE_RELEASED),
+  mk('aviators', 'eyes_accessory', 'uncommon', 'Aviators', FACE_RELEASED),
+  mk('eyepatch', 'eyes_accessory', 'uncommon', 'Eyepatch', FACE_RELEASED),
+  mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', FACE_RELEASED),
   mk('star_glasses', 'eyes_accessory', 'uncommon', 'Star Glasses', SHARED_FACE),
   mk('monocle', 'eyes_accessory', 'rare', 'Monocle', SHARED_FACE),
   mk('heart_glasses', 'eyes_accessory', 'rare', 'Heart Glasses', SHARED_FACE),
