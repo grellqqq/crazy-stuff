@@ -172,6 +172,17 @@ ITEMS = {
                         "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     "eyepatch":        {"slot": "eyes_accessory", "band": (17, 29), "diff_min": 22,
                         "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    # FACE MASKS — cover the whole face; wider band (forehead→chin), face_only.
+    "hockey_mask":     {"slot": "face_accessory", "band": (14, 33), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "gas_mask":        {"slot": "face_accessory", "band": (14, 34), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "plague_doctor":   {"slot": "face_accessory", "band": (13, 34), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "ghost_mask":      {"slot": "face_accessory", "band": (14, 33), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+    "tiki_mask":       {"slot": "face_accessory", "band": (13, 34), "diff_min": 20,
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
