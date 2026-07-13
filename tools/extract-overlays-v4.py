@@ -161,28 +161,31 @@ ITEMS = {
     # (face_region is rows 19-31; eyes ~19-26). noskin gate keeps the lens/
     # frame, rejects the face skin behind it.
     "sunglasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 22,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True,
+                        "anims": ["idle", "walk", "run", "jump"]},
     "round_glasses":   {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
     "aviators":        {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
     "nerd_glasses":    {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
     "3d_glasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
     "eyepatch":        {"slot": "eyes_accessory", "band": (17, 29), "diff_min": 22,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
-    # FACE MASKS — cover the whole face; wider band (forehead→chin), face_only.
-    "hockey_mask":     {"slot": "face_accessory", "band": (14, 33), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
-    "gas_mask":        {"slot": "face_accessory", "band": (14, 34), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
-    "plague_doctor":   {"slot": "face_accessory", "band": (13, 34), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
-    "ghost_mask":      {"slot": "face_accessory", "band": (14, 33), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
-    "tiki_mask":       {"slot": "face_accessory", "band": (13, 34), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+    # FACE MASKS — cover the whole face; front_only keeps protruding parts
+    # (plague beak, gas filter) that a tight face clip would delete.
+    "hockey_mask":     {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
+                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+    "gas_mask":        {"slot": "face_accessory", "band": (14, 38), "diff_min": 16,
+                        "gate": "noskin", "front_only": True, "fill_holes": True,
+                        "anims": ["idle", "walk", "run", "jump"]},
+    "plague_doctor":   {"slot": "face_accessory", "band": (13, 40), "diff_min": 18,
+                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+    "ghost_mask":      {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
+                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+    "tiki_mask":       {"slot": "face_accessory", "band": (13, 35), "diff_min": 18,
+                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
 }
 
 # canonical denim ramp (dark -> light)
@@ -924,6 +927,12 @@ def finish_overlay(fr, base, anim, cfg):
             fr[~dil] = 0
         else:
             fr[:] = 0
+    # FRONT_ONLY — for masks with parts that PROTRUDE past the face (plague
+    # beak, gas filter): don't intersect the tight face_region (that deletes the
+    # protruding parts). Just clear the whole frame when NO face is visible
+    # (back views); on face-visible frames keep the full band extraction.
+    if cfg.get("front_only") and not face_region(base).any():
+        fr[:] = 0
     if cfg.get("synth_sleeves"):
         fr[hand_zone(base, deep=(anim == "jump"))] = 0
         ys_b, _ = np.nonzero(base[..., 3] > 8)

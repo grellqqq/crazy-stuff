@@ -161,6 +161,9 @@ const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }
 // Released face accessory (eyes/mouth/face) — 92px shared overlay via the
 // head-band pipeline (face-band diff + face_only clip). idleAnimates: bobs with the head.
 const FACE_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
+// Face accessory WITH run+jump frames (glasses/masks that track the head through
+// every anim, so they don't drift when the character runs or jumps).
+const FACE_RELEASED_FULL: NewOpts = { fitProfile: 'shared', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };
 const SHARED_AURA: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
@@ -334,7 +337,7 @@ const AIR_SPACE_NEW: ItemDef[] = [
 const EYES_NEW: ItemDef[] = [
   mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', FACE_RELEASED),
   mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', FACE_RELEASED),
-  mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', FACE_RELEASED),
+  mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', FACE_RELEASED_FULL),
   mk('aviators', 'eyes_accessory', 'uncommon', 'Aviators', FACE_RELEASED),
   mk('eyepatch', 'eyes_accessory', 'uncommon', 'Eyepatch', FACE_RELEASED),
   mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', FACE_RELEASED),
