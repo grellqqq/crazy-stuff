@@ -335,12 +335,12 @@ const AIR_SPACE_NEW: ItemDef[] = [
 ];
 
 const EYES_NEW: ItemDef[] = [
-  mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', FACE_RELEASED),
-  mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', FACE_RELEASED),
+  mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', FACE_RELEASED_FULL),
+  mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', FACE_RELEASED_FULL),
   mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', FACE_RELEASED_FULL),
   mk('aviators', 'eyes_accessory', 'uncommon', 'Aviators', FACE_RELEASED),
   mk('eyepatch', 'eyes_accessory', 'uncommon', 'Eyepatch', FACE_RELEASED),
-  mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', FACE_RELEASED),
+  mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', FACE_RELEASED_FULL),
   mk('star_glasses', 'eyes_accessory', 'uncommon', 'Star Glasses', SHARED_FACE),
   mk('monocle', 'eyes_accessory', 'rare', 'Monocle', SHARED_FACE),
   mk('heart_glasses', 'eyes_accessory', 'rare', 'Heart Glasses', SHARED_FACE),
