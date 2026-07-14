@@ -162,30 +162,30 @@ ITEMS = {
     # frame, rejects the face skin behind it.
     "sunglasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 22,
                         "gate": "noskin", "face_only": True,
-                        "anims": ["idle", "walk", "run", "jump"]},
+                        "anims": ["idle", "walk"]},
     "round_glasses":   {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     "aviators":        {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     "nerd_glasses":    {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 18,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     "3d_glasses":      {"slot": "eyes_accessory", "band": (17, 28), "diff_min": 20,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     "eyepatch":        {"slot": "eyes_accessory", "band": (17, 29), "diff_min": 22,
-                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     # FACE MASKS — cover the whole face; front_only keeps protruding parts
     # (plague beak, gas filter) that a tight face clip would delete.
     "hockey_mask":     {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
     "gas_mask":        {"slot": "face_accessory", "band": (14, 38), "diff_min": 16,
-                        "gate": "noskin", "front_only": True, "fill_holes": True,
-                        "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "front_only": True, "face_replace": True, "fill_holes": True,
+                        "anims": ["idle", "walk"]},
     "plague_doctor":   {"slot": "face_accessory", "band": (13, 40), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
     "ghost_mask":      {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
     "tiki_mask":       {"slot": "face_accessory", "band": (13, 35), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "anims": ["idle", "walk", "run", "jump"]},
+                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)
@@ -1185,6 +1185,21 @@ def gen_item(item, body, cfg, bad=frozenset()):
                                    and not is_transferred,
                                    no_diff=is_transferred,
                                    drop_head=is_transferred and anim == "jump")
+                # FACE_REPLACE — a full-face MASK covers the face, so the diff
+                # drops its solid body wherever the mask colour ~ the face
+                # (see-through gaps). Take the state's face pixels WHOLESALE to
+                # guarantee a solid mask; the diff above still carries parts
+                # that protrude past the face (plague beak, gas filter).
+                if cfg.get("face_replace"):
+                    frg = face_region(base)
+                    dil = frg.copy()
+                    for k in range(1, 5):
+                        dil[:, k:] |= frg[:, :-k]
+                        dil[:, :-k] |= frg[:, k:]
+                        dil[k:, :] |= frg[:-k, :]
+                        dil[:-k, :] |= frg[k:, :]
+                    take = dil & (st_img[..., 3] > 8)
+                    fr[take] = st_img[take]
                 if cfg.get("fill_holes"):
                     uw = None
                     if cfg["slot"] == "upper_body":

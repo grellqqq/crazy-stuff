@@ -8,6 +8,10 @@ import {
 } from '../../shared/terrain';
 import { ITEMS, equipmentBodyKey } from '../../shared/items';
 import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META } from './itemDisplay';
+// Per-frame base head-position deltas (run/jump vs walk), baked from the base
+// bodies — see tools that write headOffsets.json. Lets head accessories without
+// their own run/jump frames ride the head instead of drifting.
+import HEAD_OFFSETS from './headOffsets.json';
 
 // ─── Tile constants (4x scale from the small grid) ──────────────────────────
 
@@ -1709,6 +1713,27 @@ export class IsoScene extends Phaser.Scene {
 
       equipSprite.setFlipX(mapping.flipX);
       equipSprite.setTint(tint);
+
+      // HEAD-ATTACH on run/jump. Head accessories (hats/glasses/masks) usually
+      // have no run/jump frames, so above they FELL BACK to the walk overlay,
+      // which the frame-lock pins onto a body whose head is elsewhere → the
+      // accessory drifts off the head. Ride the head instead: shift the sprite
+      // by the base head's per-frame movement (run/jump vs walk), baked in
+      // HEAD_OFFSETS. Items WITH real run/jump frames skip this (equipAnimKey is
+      // their own anim, not the walk fallback).
+      let hox = 0, hoy = 0;
+      if ((equipAnimType === 'run' || equipAnimType === 'jump')
+          && equipAnimKey === `equip_${eqKey}_${dir}` && bodyFrame) {
+        const hb = av.charKey.startsWith('female') ? 'female' : 'male';
+        const compass = (mapping.sheetSuffix ?? '_south').slice(1);
+        const off = (HEAD_OFFSETS as Record<string, Record<string, Record<string, number[][]>>>)
+          [hb]?.[equipAnimType]?.[compass]?.[bodyFrame.index - 1];
+        if (off) {
+          hox = (mapping.flipX ? -off[0] : off[0]) * charDef.scale;
+          hoy = off[1] * charDef.scale;
+        }
+      }
+      equipSprite.setPosition(av.bodySprite.x + hox, av.bodySprite.y + hoy);
 
       // Guard against the "huge sprite pop": if an animation/texture churn leaves
       // the sprite on a null or full-spritesheet frame, Phaser sizes it to the
