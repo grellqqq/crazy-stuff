@@ -175,17 +175,25 @@ ITEMS = {
                         "gate": "noskin", "face_only": True, "anims": ["idle", "walk"]},
     # FACE MASKS — cover the whole face; front_only keeps protruding parts
     # (plague beak, gas filter) that a tight face clip would delete.
-    "hockey_mask":     {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
-    "gas_mask":        {"slot": "face_accessory", "band": (14, 38), "diff_min": 16,
-                        "gate": "noskin", "front_only": True, "face_replace": True, "fill_holes": True,
-                        "anims": ["idle", "walk"]},
-    "plague_doctor":   {"slot": "face_accessory", "band": (13, 40), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
-    "ghost_mask":      {"slot": "face_accessory", "band": (14, 34), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
-    "tiki_mask":       {"slot": "face_accessory", "band": (13, 35), "diff_min": 18,
-                        "gate": "noskin", "front_only": True, "face_replace": True, "anims": ["idle", "walk"]},
+    # MASK-ONLY: no face_replace → the male head is NOT baked in (that was the "male
+    # head on female"). diff extracts just the mask; fill_holes closes gaps with the
+    # mask's own colour. Original uncut bands. No aggressive clip (that cut the mask).
+    # WALK/IDLE ONLY here. Run/jump mask sheets are NOT extracted from the AI
+    # generations (per-frame head drift -> floating/jittering mask; and the
+    # female jump choreography differs from the male's). They are BAKED by
+    # tools/bake-mask-runjump.py: the approved walk mask translated to each
+    # gender's measured head position per frame. Re-running THIS extractor
+    # must never overwrite the baked run/jump sheets.
+    "hockey_mask":     {"slot": "face_accessory", "band": (14, 34), "diff_min": 16,
+                        "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
+    "gas_mask":        {"slot": "face_accessory", "band": (14, 38), "diff_min": 12,
+                        "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
+    "plague_doctor":   {"slot": "face_accessory", "band": (13, 40), "diff_min": 16,
+                        "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
+    "ghost_mask":      {"slot": "face_accessory", "band": (14, 34), "diff_min": 16,
+                        "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
+    "tiki_mask":       {"slot": "face_accessory", "band": (13, 35), "diff_min": 16,
+                        "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
 }
 
 # canonical denim ramp (dark -> light)

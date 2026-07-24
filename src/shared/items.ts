@@ -164,6 +164,14 @@ const FACE_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS
 // Face accessory WITH run+jump frames (glasses/masks that track the head through
 // every anim, so they don't drift when the character runs or jumps).
 const FACE_RELEASED_FULL: NewOpts = { fitProfile: 'shared', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
+// GENDERED + FULL_ANIMS: run/jump sheets are BAKED per gender by
+// tools/bake-mask-runjump.py — the approved walk mask translated to each
+// gender's measured head position per frame (the female jump is different
+// choreography from the male's; a shared male sheet is up to 13px off her
+// head). Walk/idle art is identical in both gender folders. Masks carry ZERO
+// baked head/hair, and face_accessory renders ABOVE the hair layer — safe for
+// upcoming hair shape/color customization.
+const MASK_RELEASED: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
 const SHARED_BACK: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 const SHARED_BACK_BIG: NewOpts = { fitProfile: 'shared', frameSize: 152, availableAnims: HAT_ANIMS };
 const SHARED_AURA: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
@@ -374,11 +382,11 @@ const FACE_NEW: ItemDef[] = [
   mk('ski_mask', 'face_accessory', 'uncommon', 'Ski Mask', SHARED_FACE),
   mk('bandana_face', 'face_accessory', 'uncommon', 'Bandana', SHARED_FACE),
   mk('clown_paint', 'face_accessory', 'rare', 'Clown Paint', SHARED_FACE),
-  mk('hockey_mask', 'face_accessory', 'rare', 'Hockey Mask', FACE_RELEASED),
-  mk('plague_doctor', 'face_accessory', 'rare', 'Plague Doctor Mask', FACE_RELEASED),
-  mk('gas_mask', 'face_accessory', 'rare', 'Gas Mask', FACE_RELEASED),
-  mk('ghost_mask', 'face_accessory', 'rare', 'Screaming Ghost Mask', FACE_RELEASED),
-  mk('tiki_mask', 'face_accessory', 'rare', 'Tiki Mask', FACE_RELEASED),
+  mk('hockey_mask', 'face_accessory', 'rare', 'Hockey Mask', MASK_RELEASED),
+  mk('plague_doctor', 'face_accessory', 'rare', 'Plague Doctor Mask', MASK_RELEASED),
+  mk('gas_mask', 'face_accessory', 'rare', 'Gas Mask', MASK_RELEASED),
+  mk('ghost_mask', 'face_accessory', 'rare', 'Screaming Ghost Mask', MASK_RELEASED),
+  mk('tiki_mask', 'face_accessory', 'rare', 'Tiki Mask', MASK_RELEASED),
   mk('robot_visor', 'face_accessory', 'epic', 'Robot Visor', SHARED_FACE),
   mk('oni_mask', 'face_accessory', 'epic', 'Oni Mask', { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS }),
   mk('geisha_mask', 'face_accessory', 'epic', 'Geisha Mask', SHARED_FACE),

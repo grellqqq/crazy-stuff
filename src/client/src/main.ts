@@ -42,3 +42,18 @@ game.events.once(Phaser.Core.Events.READY, () => {
 installVolumeControl(game);
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;
+
+// Build stamp (dev only): a page loaded from a live edit shows this the instant it
+// boots. If it's missing or shows an old tag after a reload, the tab is stale (it
+// kept an old JS bundle) — reload harder. Cuts through "did my change even load?".
+export const BUILD_TAG = 'masks-backstrap-v9 / 2026-07-24';
+if (isDevMode) {
+  const b = document.createElement('div');
+  b.textContent = `BUILD: ${BUILD_TAG}`;
+  Object.assign(b.style, {
+    position: 'fixed', right: '8px', bottom: '8px', zIndex: '99999',
+    font: '12px monospace', color: '#0f0', background: 'rgba(0,0,0,.75)',
+    padding: '4px 8px', borderRadius: '4px', pointerEvents: 'none',
+  });
+  document.body.appendChild(b);
+}

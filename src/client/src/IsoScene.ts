@@ -1386,8 +1386,43 @@ export class IsoScene extends Phaser.Scene {
    * @param loadout Slot → itemId mapping (e.g. { head_accessory: 'wizard_hat' })
    * @param charKey Base character key (e.g. 'male', 'female-dark')
    */
+  /**
+   * Dev-only: fully evict an item's cached Phaser textures + anims so the next
+   * applyLoadout re-fetches the PNGs from disk. Phaser skips `load.spritesheet`
+   * for a key that already exists, so once an overlay is loaded the OLD art
+   * sticks for the whole session — re-running the dev-wardrobe snippet (which
+   * does NOT reload the page) kept showing stale art (e.g. a fixed mask still
+   * rendering the old baked-in male head). Removing the keys forces a real
+   * reload. The `?v=Date.now()` buster only defeats the *browser* cache, not
+   * Phaser's in-memory texture cache — this is the missing half.
+   */
+  private evictEquipmentCache(eqKey: string): void {
+    const prefixes = ['', 'run_', 'jump_', 'idle_'];
+    for (const p of prefixes) {
+      for (const suffix of PL_DIRS_LIST) {
+        const tex = `equip_${eqKey}_${p}${suffix}`;
+        if (this.textures.exists(tex)) this.textures.remove(tex);
+      }
+      for (const dir of Object.keys(DIR_TO_SUFFIX)) {
+        const anim = `equip_${eqKey}_${p}${dir}`;
+        if (this.anims.exists(anim)) this.anims.remove(anim);
+      }
+    }
+    this.loadedEquipment.delete(eqKey);
+  }
+
   private applyLoadout(av: AvatarData, loadout: Record<string, string>, charKey: string): void {
     av.loadout = { ...loadout };
+
+    // In dev mode, always evict cached equipment textures so art edits on disk
+    // show up on the next apply without a hard page reload (see evictEquipmentCache).
+    // Tear down this avatar's live layer sprites FIRST — removing an anim while a
+    // sprite is still playing it makes Phaser crash reading a now-gone frame.
+    const devReload = IsoScene.devCacheBust() !== '';
+    if (devReload) {
+      for (const [, s] of av.equipmentLayers) s.destroy();
+      av.equipmentLayers.clear();
+    }
 
     // Collect items that need loading — keyed by item+body, because a male and
     // a female avatar wearing the same item must NOT share textures (gendered
@@ -1396,6 +1431,7 @@ export class IsoScene extends Phaser.Scene {
     for (const [slot, itemId] of Object.entries(loadout)) {
       const eqBody = equipmentBodyKey(itemId, charKey);
       const eqKey = `${itemId}_${eqBody}`;
+      if (devReload && !this.loadingEquipment.has(eqKey)) this.evictEquipmentCache(eqKey);
       if (!this.loadedEquipment.has(eqKey) && !this.loadingEquipment.has(eqKey)) {
         toLoad.push({ itemId, slot, eqKey, eqBody });
       }

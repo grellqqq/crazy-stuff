@@ -59,7 +59,15 @@
     else cb();
   };
   const apply = (reload) => ensureGender(() => {
-    if (reload) purge(TOPS[st.ti], st.gender);
+    if (reload) {
+      purge(TOPS[st.ti], st.gender);
+      // Head/face accessories are SHARED (loaded under the 'male' body key on both
+      // genders). Purge them too so switching/reloading always refetches the
+      // current art with a fresh cache-buster — otherwise a session that loaded an
+      // accessory before an art change keeps stale run/walk anims.
+      if (EYES[st.ei]) purge(EYES[st.ei], st.gender);   // eyewear is gendered
+      if (FACE[st.ci]) purge(FACE[st.ci], st.gender);   // masks are GENDERED now (baked per-gender run/jump)
+    }
     const loadout = { upper_body: TOPS[st.ti] };
     if (EYES[st.ei]) loadout.eyes_accessory = EYES[st.ei];
     if (FACE[st.ci]) loadout.face_accessory = FACE[st.ci];
@@ -69,8 +77,26 @@
     av.sprinting = (a === 'run'); av.speedBoosted = false;
     av.jumpOffset = (a === 'jump') ? -10 : 0;
     av.lastTileChange = (a === 'idle') ? 0 : (performance.now() + 1e7);
-    hud.textContent = `WARDROBE  [N/P] top [E] eyes [C] mask [G] gender [1-4] anim [F] turn [R] reload\n`
-      + `${st.gender}  top:${TOPS[st.ti]}  eyes:${EYES[st.ei]||'none'}  mask:${FACE[st.ci]||'none'}  ${a}  ${FACINGS[st.fi]}`;
+    // BUILD DIAGNOSTIC: the run-alignment fix ships baked run overlays that the
+    // engine only loads if the items enable the 'run' anim. If your TAB is on an
+    // OLD bundle (e.g. the dev server restarted and this page lost hot-reload),
+    // the run anims never register and accessories fall back to the old floating
+    // overlay — the "double head / visible eyes" bug. Surface that plainly: check
+    // whether a run anim exists for the current accessory and tell you to reload.
+    const accKey = FACE[st.ci] ? `${FACE[st.ci]}_${st.gender}` : (EYES[st.ei] ? `${EYES[st.ei]}_${st.gender}` : null);
+    const line1 = `WARDROBE  [N/P] top [E] eyes [C] mask [G] gender [1-4] anim [F] turn [R] reload   BUILD: headlock-v7`;
+    const line2 = `${st.gender}  top:${TOPS[st.ti]}  eyes:${EYES[st.ei]||'none'}  mask:${FACE[st.ci]||'none'}  ${a}  ${FACINGS[st.fi]}`;
+    // Equipment loads ASYNC, so poll a moment before judging run-art presence. On an
+    // OLD bundle (no 'run' in the item anims) it stays OFF forever → reload signal.
+    const checkRunArt = () => {
+      if (!accKey) { hud.textContent = `${line1}\n${line2}\nRUN-ART: n/a (equip a mask/glasses)`; return; }
+      const anyRun = ['S','SA','A','WA','W','WD','D','SD'].some((dd) => iso.anims.exists(`equip_${accKey}_run_${dd}`));
+      const status = anyRun ? 'ON ✓' : 'OFF ✗  → RELOAD PAGE (Ctrl+Shift+R) then re-run the console line';
+      hud.textContent = `${line1}\n${line2}\nRUN-ART: ${status}`;
+    };
+    hud.textContent = `${line1}\n${line2}\nRUN-ART: checking…`;
+    setTimeout(checkRunArt, 300);
+    setTimeout(checkRunArt, 1200);
   });
   // Remove a prior paste's listener so re-pasting doesn't double-fire keys.
   if (window.__wardrobeKey) window.removeEventListener('keydown', window.__wardrobeKey);
@@ -78,8 +104,8 @@
     const k = e.key.toLowerCase();
     if (k === 'n') { st.ti = (st.ti + 1) % TOPS.length; apply(true); }
     else if (k === 'p') { st.ti = (st.ti - 1 + TOPS.length) % TOPS.length; apply(true); }
-    else if (k === 'e') { st.ei = (st.ei + 1) % EYES.length; apply(false); }
-    else if (k === 'c') { st.ci = (st.ci + 1) % FACE.length; apply(false); }
+    else if (k === 'e') { st.ei = (st.ei + 1) % EYES.length; apply(true); }
+    else if (k === 'c') { st.ci = (st.ci + 1) % FACE.length; apply(true); }
     else if (k === 'g') { st.gender = st.gender === 'male' ? 'female' : 'male'; apply(true); }
     else if (['1','2','3','4'].includes(k)) { st.ai = +k - 1; apply(false); }
     else if (k === 'f') { st.fi = (st.fi + 1) % FACINGS.length; apply(false); }
