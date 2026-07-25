@@ -348,12 +348,14 @@ const AIR_SPACE_NEW: ItemDef[] = [
 ];
 
 const EYES_NEW: ItemDef[] = [
-  mk('round_glasses', 'eyes_accessory', 'common', 'Round Glasses', FACE_RELEASED),
-  mk('nerd_glasses', 'eyes_accessory', 'common', 'Nerd Glasses', FACE_RELEASED),
-  mk('sunglasses', 'eyes_accessory', 'uncommon', 'Sunglasses', FACE_RELEASED),
-  mk('aviators', 'eyes_accessory', 'uncommon', 'Aviators', FACE_RELEASED),
-  mk('eyepatch', 'eyes_accessory', 'uncommon', 'Eyepatch', FACE_RELEASED),
-  mk('3d_glasses', 'eyes_accessory', 'uncommon', '3D Glasses', FACE_RELEASED),
+  // Rarities per design call 2026-07-25 (Gabriel): glasses laddered
+  // uncommon → rare → epic (eyepatch) → legendary (3D).
+  mk('round_glasses', 'eyes_accessory', 'uncommon', 'Round Glasses', FACE_RELEASED),
+  mk('nerd_glasses', 'eyes_accessory', 'uncommon', 'Nerd Glasses', FACE_RELEASED),
+  mk('sunglasses', 'eyes_accessory', 'rare', 'Sunglasses', FACE_RELEASED),
+  mk('aviators', 'eyes_accessory', 'rare', 'Aviators', FACE_RELEASED),
+  mk('eyepatch', 'eyes_accessory', 'epic', 'Eyepatch', FACE_RELEASED),
+  mk('3d_glasses', 'eyes_accessory', 'legendary', '3D Glasses', FACE_RELEASED),
   mk('star_glasses', 'eyes_accessory', 'uncommon', 'Star Glasses', SHARED_FACE),
   mk('monocle', 'eyes_accessory', 'rare', 'Monocle', SHARED_FACE),
   mk('heart_glasses', 'eyes_accessory', 'rare', 'Heart Glasses', SHARED_FACE),
@@ -387,11 +389,13 @@ const FACE_NEW: ItemDef[] = [
   mk('ski_mask', 'face_accessory', 'uncommon', 'Ski Mask', SHARED_FACE),
   mk('bandana_face', 'face_accessory', 'uncommon', 'Bandana', SHARED_FACE),
   mk('clown_paint', 'face_accessory', 'rare', 'Clown Paint', SHARED_FACE),
-  mk('hockey_mask', 'face_accessory', 'rare', 'Hockey Mask', MASK_RELEASED),
-  mk('plague_doctor', 'face_accessory', 'rare', 'Plague Doctor Mask', MASK_RELEASED),
-  mk('gas_mask', 'face_accessory', 'rare', 'Gas Mask', MASK_RELEASED),
-  mk('ghost_mask', 'face_accessory', 'rare', 'Screaming Ghost Mask', MASK_RELEASED),
-  mk('tiki_mask', 'face_accessory', 'rare', 'Tiki Mask', MASK_RELEASED),
+  // Rarities per design call 2026-07-25 (Gabriel): all masks epic, tiki the
+  // legendary chase piece.
+  mk('hockey_mask', 'face_accessory', 'epic', 'Hockey Mask', MASK_RELEASED),
+  mk('plague_doctor', 'face_accessory', 'epic', 'Plague Doctor Mask', MASK_RELEASED),
+  mk('gas_mask', 'face_accessory', 'epic', 'Gas Mask', MASK_RELEASED),
+  mk('ghost_mask', 'face_accessory', 'epic', 'Screaming Ghost Mask', MASK_RELEASED),
+  mk('tiki_mask', 'face_accessory', 'legendary', 'Tiki Mask', MASK_RELEASED),
   mk('robot_visor', 'face_accessory', 'epic', 'Robot Visor', SHARED_FACE),
   mk('oni_mask', 'face_accessory', 'epic', 'Oni Mask', { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS }),
   mk('geisha_mask', 'face_accessory', 'epic', 'Geisha Mask', SHARED_FACE),
