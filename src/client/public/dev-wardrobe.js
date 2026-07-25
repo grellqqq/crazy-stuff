@@ -84,7 +84,7 @@
     // overlay — the "double head / visible eyes" bug. Surface that plainly: check
     // whether a run anim exists for the current accessory and tell you to reload.
     const accKey = FACE[st.ci] ? `${FACE[st.ci]}_${st.gender}` : (EYES[st.ei] ? `${EYES[st.ei]}_${st.gender}` : null);
-    const line1 = `WARDROBE  [N/P] top [E] eyes [C] mask [G] gender [1-4] anim [F] turn [R] reload   BUILD: headlock-v7`;
+    const line1 = `WARDROBE  [N/P] top [E] eyes [C] mask [G] gender [1-4] anim [F] turn [R] reload   BUILD: eyes-femfix-v10`;
     const line2 = `${st.gender}  top:${TOPS[st.ti]}  eyes:${EYES[st.ei]||'none'}  mask:${FACE[st.ci]||'none'}  ${a}  ${FACINGS[st.fi]}`;
     // Equipment loads ASYNC, so poll a moment before judging run-art presence. On an
     // OLD bundle (no 'run' in the item anims) it stays OFF forever → reload signal.

@@ -158,12 +158,17 @@ const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS
 // run/jump -> walk. idleAnimates: clean breathing-idle bobs with the body.
 const TOP_RELEASED: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
 const SHARED_FACE: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS }; // frame 92
-// Released face accessory (eyes/mouth/face) — 92px shared overlay via the
-// head-band pipeline (face-band diff + face_only clip). idleAnimates: bobs with the head.
-const FACE_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
-// Face accessory WITH run+jump frames (glasses/masks that track the head through
-// every anim, so they don't drift when the character runs or jumps).
-const FACE_RELEASED_FULL: NewOpts = { fitProfile: 'shared', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
+// Released eyewear — GENDERED + FULL_ANIMS. The female run/jump choreography
+// differs from the male's (head up to 13px away on the same frame), so male-
+// fitted sheets drift on her. Male art: warp pipeline (approved as-is). Female:
+// tools/bake-eyes-runjump.py — walk/idle copied from the approved male sheets,
+// run/jump head-lock baked to HER measured per-frame head anchors (back views
+// included, so temple arms/strap show from behind). idleAnimates: bobs.
+const FACE_RELEASED: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, released: true, idleAnimates: true };
+// Full-face masks — SHARED (one /male/ set). run/jump frames are extracted
+// NATIVELY from real PixelLab run/jump poses (tools/extract-overlays-v4.py),
+// so the mask fits each pose with no warping and transparent eye-holes let the
+// wearer's own face show — identical fit on male and female (same anim skeleton).
 // GENDERED + FULL_ANIMS: run/jump sheets are BAKED per gender by
 // tools/bake-mask-runjump.py — the approved walk mask translated to each
 // gender's measured head position per frame (the female jump is different
