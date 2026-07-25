@@ -44,7 +44,7 @@ test('AC9 — new account gets the 3-item starter kit, auto-equipped', async () 
   const inv = await mongo.getInventory(USER);
   assert.equal(inv.length, 3, 'exactly 3 starter items');
   assert.deepEqual(
-    inv.map((i: any) => i.itemId).sort(),
+    inv.map((i: any) => i.item_id).sort(),   // getInventory returns the client snake_case shape
     ['beatup_sneakers', 'blue_jeans', 'worn_tshirt'],
   );
   assert.ok(inv.every((i: any) => i.equipped), 'all starter items equipped');

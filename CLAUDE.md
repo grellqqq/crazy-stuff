@@ -21,10 +21,16 @@ Each agent owns a specific domain, enforcing separation of concerns and quality.
 The repo uses npm workspaces. Run these from the **root**:
 
 ```bash
-# Start client dev server (Vite, http://localhost:5173)
+# Start client dev server (Vite, http://localhost:8080)
 npm run dev
 
-# Start game server (tsx watch, ws://localhost:3000)
+# Start game server WITH database (in-memory MongoDB + tsx watch, :3000).
+# THIS is the normal dev server command — login/register/inventory need it.
+# The DB is EPHEMERAL: every restart wipes accounts (register fresh).
+node tools/dev-with-db.mjs
+
+# Game server WITHOUT a database (auth disabled — /auth routes return 500;
+# only useful for pure room/movement work)
 npm run server
 
 # Build client for production

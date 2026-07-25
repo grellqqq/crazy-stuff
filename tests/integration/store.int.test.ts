@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { currentSeasonId } from '../../src/shared/season.ts';
 import { STORE_PRICES } from '../../src/shared/store.ts';
+import { ITEMS } from '../../src/shared/items.ts';
 
 let replset: MongoMemoryReplSet;
 let mongo: typeof import('../../src/server/src/db/mongo.ts');
@@ -107,9 +108,12 @@ test('store_buy_insufficientCoins_rejected', async () => {
 });
 
 test('store_setRotation_rejectsUnreleasedOrTooMany', async () => {
-  // Unreleased catalog item (art-gated) cannot be curated.
+  // Unreleased catalog item (art-gated) cannot be curated. Found dynamically —
+  // a hardcoded id goes stale the moment that item's art ships (hoodie_black did).
+  const unreleased = Object.entries(ITEMS).find(([, d]) => (d as any).released === false)?.[0];
+  assert.ok(unreleased, 'catalog still has at least one unreleased item');
   await assert.rejects(
-    () => mongo.setStoreRotation('2099-01', ['hoodie_black']),
+    () => mongo.setStoreRotation('2099-01', [unreleased!]),
     (e: any) => e.code === 'INVALID_ITEM',
   );
   // More than STORE_SIZE (5) released items.
