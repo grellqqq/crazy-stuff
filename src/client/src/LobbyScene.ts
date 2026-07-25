@@ -691,7 +691,7 @@ export class LobbyScene extends Phaser.Scene {
     this.gatchaman = this.add.sprite(gx, gy, 'gatchaman_idle')
       .setScale(0.66).setOrigin(0.5, 0.9).setDepth(gy);
     this.gatchaman.setData('ename', 'gatchaman');
-    this.addNpcName('Gatchaman', gx, gy - 72);
+    this.addNpcName('Gachaman', gx, gy - 72);
     this.gatchaman.play('gatchaman_idle');
     this.startGatchamanChatter();
   }
@@ -888,17 +888,40 @@ export class LobbyScene extends Phaser.Scene {
     npc.stuckMs = 0;
   }
 
-  /** Released items grouped by slot (for random NPC outfits), cached.
-   *  Hats/head accessories are intentionally excluded (the wizard hat is the
-   *  only released one and it sits off the body). */
+  /** NPC wardrobe: a FROZEN allowlist (design decision 2026-07-24) — lobby
+   *  NPCs wear only the basics available at lock time: current tees/hoodies,
+   *  current jeans, current sneakers. Newly released items (jackets, masks,
+   *  future pants/tops/shoes) must NOT auto-enter this pool — extend the
+   *  lists deliberately when the wardrobe direction says so. */
+  private static readonly NPC_WARDROBE: Record<string, string[]> = {
+    upper_body: [
+      'worn_tshirt', 'tshirt_black', 'tshirt_blue', 'tshirt_brown',
+      'tshirt_green', 'tshirt_pink', 'tshirt_purple', 'tshirt_red',
+      'tshirt_stripes', 'tshirt_white', 'tshirt_yellow',
+      'hoodie_black', 'hoodie_blue', 'hoodie_brown', 'hoodie_green',
+      'hoodie_pink', 'hoodie_purple', 'hoodie_red', 'hoodie_white',
+      'hoodie_yellow',
+    ],
+    lower_body: [
+      'blue_jeans', 'jeans_black', 'jeans_brown', 'jeans_green',
+      'jeans_grey', 'jeans_khaki', 'jeans_red',
+    ],
+    feet: [
+      'beatup_sneakers', 'sneakers_black', 'sneakers_blue', 'sneakers_green',
+      'sneakers_pink', 'sneakers_red', 'sneakers_yellow',
+    ],
+  };
+
+  /** NPC outfit pool by slot: the frozen allowlist, minus anything whose art
+   *  got unreleased in the catalog (safety — never dress an invisible item). */
   private releasedItemsBySlot(): Record<string, string[]> {
     if (this.releasedBySlot) return this.releasedBySlot;
-    const SLOTS = ['upper_body', 'lower_body', 'feet'];
     const bySlot: Record<string, string[]> = {};
-    for (const [id, def] of Object.entries(ITEMS)) {
-      if ((def as { released?: boolean }).released === false) continue;
-      const slot = (def as { slot?: string }).slot;
-      if (slot && SLOTS.includes(slot)) (bySlot[slot] ??= []).push(id);
+    for (const [slot, ids] of Object.entries(LobbyScene.NPC_WARDROBE)) {
+      bySlot[slot] = ids.filter((id) => {
+        const def = ITEMS[id] as { released?: boolean } | undefined;
+        return def !== undefined && def.released !== false;
+      });
     }
     this.releasedBySlot = bySlot;
     return bySlot;
