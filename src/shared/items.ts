@@ -67,6 +67,9 @@ export interface ItemDef {
    * See `inGachaPool` and design/gdd/item-catalog.md §4.7.
    */
   released?: boolean;
+  /** BIG hair that renders ABOVE face accessories (see IsoScene LAYER_ORDER
+   *  exception): masks would otherwise ghost the baked head inside it. */
+  hairOver?: boolean;
   /**
    * Whether the idle overlay should ANIMATE in sync with the body's breathing
    * idle (frame-locked to the body frame) instead of holding one static frame.
@@ -99,6 +102,8 @@ type NewOpts = {
   released?: boolean;
   /** Animate the idle overlay in sync with the body (clean idle sheets only). */
   idleAnimates?: boolean;
+  /** Big hair rendered above face accessories (afro family). */
+  hairOver?: boolean;
 };
 
 /** A single not-yet-released catalog entry. */
@@ -116,6 +121,7 @@ function mk(
     availableAnims: opts.availableAnims ?? HAT_ANIMS,
     released: opts.released ?? false,
     ...(opts.idleAnimates ? { idleAnimates: true } : {}),
+    ...(opts.hairOver ? { hairOver: true } : {}),
   };
 }
 
@@ -150,6 +156,9 @@ const CARGO3 = ['green', 'brown', 'black'] as const;
 
 const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, idleAnimates: true };
 const SHARED_HEAD: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
+// Wave-1 hair (GDD 12): gendered 92px paint-over overlays, full anims (run/jump
+// head-lock baked), idle frame-locked to the breathing body.
+const HAIR_WAVE1: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, idleAnimates: true };
 // Released head accessories — art produced via the v4 head-band pipeline at 92px
 // (omit frameSize → defaults 92). Flip items to this as their art lands.
 const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
@@ -300,13 +309,17 @@ const HEAD_NEW: ItemDef[] = [
 ];
 
 const HAIR_NEW: ItemDef[] = [
-  ...colorFamily('hair_short', 'hair', 'common', 'Short Hair', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_ponytail', 'hair', 'common', 'Ponytail', HAIR5, SHARED_HEAD),
+  // WAVE-1 hair (GDD 12, approved 2026-07-26): gendered 92px paint-over
+  // overlays; run/jump are head-lock BAKED per gender (never AI-generated).
+  // Still released:false until the AC1-AC10 ladder passes.
+  ...colorFamily('hair_short', 'hair', 'common', 'Short Hair', HAIR5, HAIR_WAVE1),
+  ...colorFamily('hair_ponytail', 'hair', 'common', 'Ponytail', HAIR5, HAIR_WAVE1),
+  ...colorFamily('hair_long', 'hair', 'uncommon', 'Long Hair', HAIR5, HAIR_WAVE1),
+  ...colorFamily('hair_afro', 'hair', 'uncommon', 'Afro', HAIR5, { ...HAIR_WAVE1, hairOver: true }),
+  ...colorFamily('hair_dreads', 'hair', 'rare', 'Dreads', HAIR5, HAIR_WAVE1),
+  // WAVE-2 (scalp shows → needs per-body skin-tone variants; GDD 12 §3 R4):
   ...colorFamily('hair_buzzcut', 'hair', 'common', 'Buzzcut', HAIR5, SHARED_HEAD),
   ...colorFamily('hair_mohawk', 'hair', 'uncommon', 'Mohawk', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_long', 'hair', 'uncommon', 'Long Hair', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_afro', 'hair', 'uncommon', 'Afro', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_dreads', 'hair', 'rare', 'Dreads', HAIR5, SHARED_HEAD),
   ...colorFamily('hair_undercut', 'hair', 'rare', 'Undercut', HAIR5, SHARED_HEAD),
   mk('hair_flaming', 'hair', 'epic', 'Flaming Hair', SHARED_HEAD),
   mk('hair_neon_glow', 'hair', 'epic', 'Neon Glow Hair', SHARED_HEAD),

@@ -1552,7 +1552,18 @@ export class IsoScene extends Phaser.Scene {
     }
     av.equipmentLayers.clear();
 
-    for (const slot of LAYER_ORDER) {
+    // Per-item layering exception: BIG hair (afro family, item flag hairOver)
+    // renders ABOVE face accessories — otherwise the mask's head-hugging parts
+    // (back strap, 3/4-view slivers, all shaped to the BAKED head) draw a ghost
+    // of the small head INSIDE the big hair. Sleek styles stay UNDER masks so
+    // full-face masks keep a clean surface (hair fringe never smears on them).
+    const order: string[] = [...LAYER_ORDER];
+    const hairItem = av.loadout['hair'] ? ITEMS[av.loadout['hair']] : undefined;
+    if (hairItem && (hairItem as { hairOver?: boolean }).hairOver) {
+      order.splice(order.indexOf('hair'), 1);
+      order.splice(order.indexOf('face_accessory') + 1, 0, 'hair');
+    }
+    for (const slot of order) {
       if (slot === 'skin') continue; // body sprite is always present
 
       const itemId = av.loadout[slot];
@@ -1770,6 +1781,22 @@ export class IsoScene extends Phaser.Scene {
         }
       }
       equipSprite.setPosition(av.bodySprite.x + hox, av.bodySprite.y + hoy);
+
+      // Tiki's carved wood BACK is visible from behind. On back-facing sheets the
+      // head sits BETWEEN the mask and the camera, so the mask must draw behind
+      // the head, not on top of it. Depth is uniform (+0.01) for equipment.
+      //   front  -> above the hair (mask on the face): +0.011
+      //   back + hair item -> under the OVERLAY hair, over the body: +0.005
+      //     (the hair overlay hides the wood-back, only its top peeks)
+      //   back + NO hair -> under the BODY: -0.005 — the base head (with its own
+      //     drawn hair) hides the wood-back, so it never overlaps a bare head.
+      if (equipSprite.getData('itemId') === 'tiki_mask') {
+        const backFacing = mapping.sheetSuffix === '_north'
+          || mapping.sheetSuffix === '_north-east';
+        const hasHair = !!av.loadout['hair'];
+        const dz = !backFacing ? 0.011 : (hasHair ? 0.005 : -0.005);
+        equipSprite.setDepth(av.bodySprite.depth + dz);
+      }
 
       // Guard against the "huge sprite pop": if an animation/texture churn leaves
       // the sprite on a null or full-spritesheet frame, Phaser sizes it to the

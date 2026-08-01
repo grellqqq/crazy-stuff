@@ -46,7 +46,7 @@ installVolumeControl(game);
 // Build stamp (dev only): a page loaded from a live edit shows this the instant it
 // boots. If it's missing or shows an old tag after a reload, the tab is stale (it
 // kept an old JS bundle) — reload harder. Cuts through "did my change even load?".
-export const BUILD_TAG = 'jeans-npc-v11 / 2026-07-24';
+export const BUILD_TAG = 'tiki-depth-v31 / 2026-08-01';
 if (isDevMode) {
   const b = document.createElement('div');
   b.textContent = `BUILD: ${BUILD_TAG}`;

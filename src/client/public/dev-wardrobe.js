@@ -17,11 +17,13 @@
   // '' = none. Head/face accessories are shared (same on male + female).
   const EYES = ['','sunglasses','round_glasses','aviators','nerd_glasses','3d_glasses','eyepatch'];
   const FACE = ['','hockey_mask','gas_mask','plague_doctor','ghost_mask','tiki_mask'];
+  // Wave-1 hair (proxy blue lands first; other colors appear after recolor).
+  const HAIR = ['','hair_short_blue','hair_ponytail_blue','hair_long_blue','hair_afro_blue','hair_dreads_blue'];
   const ANIMS = ['idle','walk','run','jump'];
   const FACINGS = ['S','SD','D','WD','W','WA','A','SA'];
   const COMPASS = ['south','south-west','west','north-west','north','north-east','east','south-east'];
   const SHORT = ['S','SA','A','WA','W','WD','D','SD'];
-  const st = { ti:7, ei:0, ci:0, ai:0, fi:1, gender: av.charKey || 'male' };
+  const st = { ti:7, ei:0, ci:0, hi:0, ai:0, fi:1, gender: av.charKey || 'male' };
   let hud = document.getElementById('wardrobe-hud');
   if (!hud) {
     hud = document.createElement('div'); hud.id = 'wardrobe-hud';
@@ -67,10 +69,12 @@
       // accessory before an art change keeps stale run/walk anims.
       if (EYES[st.ei]) purge(EYES[st.ei], st.gender);   // eyewear is gendered
       if (FACE[st.ci]) purge(FACE[st.ci], st.gender);   // masks are GENDERED now (baked per-gender run/jump)
+      if (HAIR[st.hi]) purge(HAIR[st.hi], st.gender);   // hair is gendered (wave-1)
     }
     const loadout = { upper_body: TOPS[st.ti] };
     if (EYES[st.ei]) loadout.eyes_accessory = EYES[st.ei];
     if (FACE[st.ci]) loadout.face_accessory = FACE[st.ci];
+    if (HAIR[st.hi]) loadout.hair = HAIR[st.hi];
     iso.applyLoadout(av, loadout, st.gender);
     iso.playerFacing = FACINGS[st.fi];
     const a = ANIMS[st.ai];
@@ -84,8 +88,8 @@
     // overlay — the "double head / visible eyes" bug. Surface that plainly: check
     // whether a run anim exists for the current accessory and tell you to reload.
     const accKey = FACE[st.ci] ? `${FACE[st.ci]}_${st.gender}` : (EYES[st.ei] ? `${EYES[st.ei]}_${st.gender}` : null);
-    const line1 = `WARDROBE  [N/P] top [E] eyes [C] mask [G] gender [1-4] anim [F] turn [R] reload   BUILD: eyes-femfix-v10`;
-    const line2 = `${st.gender}  top:${TOPS[st.ti]}  eyes:${EYES[st.ei]||'none'}  mask:${FACE[st.ci]||'none'}  ${a}  ${FACINGS[st.fi]}`;
+    const line1 = `WARDROBE  [N/P] top [E] eyes [C] mask [H] hair [G] gender [1-4] anim [F] turn [R] reload   BUILD: eyes-femfix-v10`;
+    const line2 = `${st.gender}  top:${TOPS[st.ti]}  eyes:${EYES[st.ei]||'none'}  mask:${FACE[st.ci]||'none'}  hair:${HAIR[st.hi]||'none'}  ${a}  ${FACINGS[st.fi]}`;
     // Equipment loads ASYNC, so poll a moment before judging run-art presence. On an
     // OLD bundle (no 'run' in the item anims) it stays OFF forever → reload signal.
     const checkRunArt = () => {
@@ -106,6 +110,7 @@
     else if (k === 'p') { st.ti = (st.ti - 1 + TOPS.length) % TOPS.length; apply(true); }
     else if (k === 'e') { st.ei = (st.ei + 1) % EYES.length; apply(true); }
     else if (k === 'c') { st.ci = (st.ci + 1) % FACE.length; apply(true); }
+    else if (k === 'h') { st.hi = (st.hi + 1) % HAIR.length; apply(true); }
     else if (k === 'g') { st.gender = st.gender === 'male' ? 'female' : 'male'; apply(true); }
     else if (['1','2','3','4'].includes(k)) { st.ai = +k - 1; apply(false); }
     else if (k === 'f') { st.fi = (st.fi + 1) % FACINGS.length; apply(false); }

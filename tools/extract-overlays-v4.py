@@ -184,6 +184,22 @@ ITEMS = {
     # tools/bake-mask-runjump.py: the approved walk mask translated to each
     # gender's measured head position per frame. Re-running THIS extractor
     # must never overwrite the baked run/jump sheets.
+    # WAVE-1 HAIR (GDD 12): proxy-blue states, extracted walk/idle only —
+    # run/jump come from the head-lock bake. Deep band: long/dreads reach the
+    # shoulders; afro is wide. The bluehair gate makes the diff trivial (the
+    # proxy is the only blue on the sprite). NO front_only — hair IS the back
+    # of the head (F1 coverage gate runs in the bake tool). Per-gender source
+    # dirs (hair-w1/<item>-<body>), fitProfile gendered.
+    "hair_short":      {"slot": "hair", "band": (0, 31), "diff_min": 14,
+                        "gate": "bluehair", "fill_holes": True, "anims": ["idle", "walk"]},
+    "hair_ponytail":   {"slot": "hair", "band": (0, 48), "diff_min": 14,
+                        "gate": "bluehair", "fill_holes": True, "anims": ["idle", "walk"]},
+    "hair_long":       {"slot": "hair", "band": (0, 76), "diff_min": 14,
+                        "gate": "bluehair", "fill_holes": True, "anims": ["idle", "walk"]},
+    "hair_afro":       {"slot": "hair", "band": (0, 46), "diff_min": 14,
+                        "gate": "bluehair", "fill_holes": True, "anims": ["idle", "walk"]},
+    "hair_dreads":     {"slot": "hair", "band": (0, 52), "diff_min": 14,
+                        "gate": "bluehair", "fill_holes": True, "anims": ["idle", "walk"]},
     "hockey_mask":     {"slot": "face_accessory", "band": (14, 34), "diff_min": 16,
                         "gate": "noskin", "front_only": True, "fill_holes": True, "anims": ["idle", "walk"]},
     "gas_mask":        {"slot": "face_accessory", "band": (14, 38), "diff_min": 12,
@@ -357,6 +373,11 @@ def color_gate(state, kind):
         skin = (r - b > 40) & (sat > 48)
         white_underwear = (lum > 200) & (sat < 30)
         return (sat < 78) & ~skin & ~white_underwear
+    if kind == "bluehair":  # wave-1 hair proxy: the ONLY blue on the sprite is
+        # the new hair (skin warm, underwear white, outline near-black). Keep
+        # blue-dominant pixels + the hair's own dark outline shades (attached
+        # blue-adjacent darks are kept by fill/despeckle later).
+        return ((b > r + 12) & (b > 60)) | ((lum < 34) & (b >= r))
     if kind == "noskin":    # colored hats: keep ANY hat colour, reject only the
         # warm face skin the state redraws under the band. Skin = reddish
         # (r>b), mid-bright, moderately saturated; vivid hats sit outside this.
