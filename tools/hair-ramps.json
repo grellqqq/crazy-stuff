@@ -1,0 +1,10 @@
+{
+  "_comment": "GDD 12 F3 hair recolor ramps. Blue is the extraction PROXY; each catalog colour is a 6-step ramp (dark->light) that the blue overlay's per-pixel luminance is mapped onto (interpolated, rank-preserving). Outline pixels (lum<32, neutral near-black) are preserved. blonde brightest lum<=210 (no white-out on pale skin); black keeps >=3 distinct steps.",
+  "source_luma": { "min": 32, "max": 207 },
+  "ramps": {
+    "brown":  ["#2a1c0e", "#4a3016", "#6b4620", "#8a5c2c", "#a5723a", "#c08a4e"],
+    "black":  ["#0c0c0e", "#18181c", "#26262b", "#34343b", "#42424a", "#52525c"],
+    "blonde": ["#4a3316", "#7a5a24", "#a07e34", "#c8a24a", "#dcc06a", "#ecd68e"],
+    "red":    ["#2c0c08", "#561410", "#841e16", "#ad2f1e", "#cc4a2c", "#e37044"]
+  }
+}
