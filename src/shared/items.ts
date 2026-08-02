@@ -136,9 +136,14 @@ function colorFamily(
   nameBase: string,
   colors: readonly string[],
   opts: NewOpts,
+  rarityByColor?: Partial<Record<string, Rarity>>,
 ): ItemDef[] {
-  return colors.map((c) => mk(`${prefix}_${c}`, slot, rarity, `${cap(c)} ${nameBase}`, opts));
+  return colors.map((c) =>
+    mk(`${prefix}_${c}`, slot, rarityByColor?.[c] ?? rarity, `${cap(c)} ${nameBase}`, opts));
 }
+// Blue is the premium DYED hair colour — always Rare regardless of the shape's
+// base tier (colour scarcity as economy, GDD 12 R2). Applied to every hair family.
+const HAIR_BLUE_RARE = { blue: 'rare' as Rarity };
 
 // Named color sets (item-catalog.md §2).
 const TEE10 = ['black', 'blue', 'brown', 'green', 'pink', 'purple', 'red', 'stripes', 'white', 'yellow'] as const;
@@ -158,7 +163,7 @@ const GENDERED_FULL: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_AN
 const SHARED_HEAD: NewOpts = { fitProfile: 'shared', frameSize: 132, availableAnims: HAT_ANIMS };
 // Wave-1 hair (GDD 12): gendered 92px paint-over overlays, full anims (run/jump
 // head-lock baked), idle frame-locked to the breathing body.
-const HAIR_WAVE1: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, idleAnimates: true };
+const HAIR_WAVE1: NewOpts = { fitProfile: 'gendered', availableAnims: FULL_ANIMS, idleAnimates: true, released: true };
 // Released head accessories — art produced via the v4 head-band pipeline at 92px
 // (omit frameSize → defaults 92). Flip items to this as their art lands.
 const HEAD_RELEASED: NewOpts = { fitProfile: 'shared', availableAnims: HAT_ANIMS, released: true, idleAnimates: true };
@@ -312,15 +317,15 @@ const HAIR_NEW: ItemDef[] = [
   // WAVE-1 hair (GDD 12, approved 2026-07-26): gendered 92px paint-over
   // overlays; run/jump are head-lock BAKED per gender (never AI-generated).
   // Still released:false until the AC1-AC10 ladder passes.
-  ...colorFamily('hair_short', 'hair', 'common', 'Short Hair', HAIR5, HAIR_WAVE1),
-  ...colorFamily('hair_ponytail', 'hair', 'common', 'Ponytail', HAIR5, HAIR_WAVE1),
-  ...colorFamily('hair_long', 'hair', 'uncommon', 'Long Hair', HAIR5, HAIR_WAVE1),
-  ...colorFamily('hair_afro', 'hair', 'uncommon', 'Afro', HAIR5, { ...HAIR_WAVE1, hairOver: true }),
-  ...colorFamily('hair_dreads', 'hair', 'rare', 'Dreads', HAIR5, HAIR_WAVE1),
+  ...colorFamily('hair_short', 'hair', 'common', 'Short Hair', HAIR5, HAIR_WAVE1, HAIR_BLUE_RARE),
+  ...colorFamily('hair_ponytail', 'hair', 'common', 'Ponytail', HAIR5, HAIR_WAVE1, HAIR_BLUE_RARE),
+  ...colorFamily('hair_long', 'hair', 'uncommon', 'Long Hair', HAIR5, HAIR_WAVE1, HAIR_BLUE_RARE),
+  ...colorFamily('hair_afro', 'hair', 'uncommon', 'Afro', HAIR5, { ...HAIR_WAVE1, hairOver: true }, HAIR_BLUE_RARE),
+  ...colorFamily('hair_dreads', 'hair', 'rare', 'Dreads', HAIR5, HAIR_WAVE1, HAIR_BLUE_RARE),
   // WAVE-2 (scalp shows → needs per-body skin-tone variants; GDD 12 §3 R4):
-  ...colorFamily('hair_buzzcut', 'hair', 'common', 'Buzzcut', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_mohawk', 'hair', 'uncommon', 'Mohawk', HAIR5, SHARED_HEAD),
-  ...colorFamily('hair_undercut', 'hair', 'rare', 'Undercut', HAIR5, SHARED_HEAD),
+  ...colorFamily('hair_buzzcut', 'hair', 'common', 'Buzzcut', HAIR5, SHARED_HEAD, HAIR_BLUE_RARE),
+  ...colorFamily('hair_mohawk', 'hair', 'uncommon', 'Mohawk', HAIR5, SHARED_HEAD, HAIR_BLUE_RARE),
+  ...colorFamily('hair_undercut', 'hair', 'rare', 'Undercut', HAIR5, SHARED_HEAD, HAIR_BLUE_RARE),
   mk('hair_flaming', 'hair', 'epic', 'Flaming Hair', SHARED_HEAD),
   mk('hair_neon_glow', 'hair', 'epic', 'Neon Glow Hair', SHARED_HEAD),
   mk('hair_galaxy', 'hair', 'legendary', 'Galaxy Hair', SHARED_HEAD),
