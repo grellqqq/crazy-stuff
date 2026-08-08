@@ -173,6 +173,26 @@ const SEND_INTERVAL = 60;
 const MOVE_LERP_BASE = 0.0000004;      // normal movement (~RATE 14.7/s)
 const MOVE_LERP_SLOW_BASE = 0.00008;   // slow terrain / penalized / knockback
 
+// ─── Client-side prediction (LOCAL avatar only) ─────────────────────────────
+// The server is authoritative for ALL movement (RaceRoom.handleMove) and never
+// trusts a client position — only a direction string. Prediction is therefore a
+// DISPLAY-ONLY optimization: the local avatar steps immediately on input at the
+// server's move cadence, then reconciles to server truth on every `state`. It
+// changes nothing on the wire, so it grants zero gameplay advantage (verified by
+// the server move-path audit, 2026-08-08). Append `?nopredict` to disable it for
+// A/B feel-testing against the old server-follow behaviour.
+//
+// Isometric tile deltas per direction — MUST match RaceRoom.MOVE_DELTAS so a
+// predicted step lands on the exact tile the server will compute.
+const MOVE_DELTAS: Record<string, [number, number]> = {
+  W: [-1, -1], S: [1, 1], A: [-1, 1], D: [1, -1],     // diagonals
+  WD: [0, -1], WA: [-1, 0], SD: [1, 0], SA: [0, 1],    // cardinals
+};
+const PREDICT_MAX_LEAD = 1;          // tiles prediction may run ahead of the server-confirmed tile
+const PREDICT_COOLDOWN = 100;        // mirror server DEFAULT_COOLDOWN (ms) — normal walk cadence
+const PREDICT_SPRINT_COOLDOWN = 50;  // mirror server SPRINT_COOLDOWN — sprint cadence
+const PREDICT_SETTLE_MS = 220;       // idle time after which a jitter-rejected final step settles to truth
+
 // PixelLab body-sheet direction suffixes. Characters are loaded ON DEMAND per
 // charKey (ensureCharLoaded) when an avatar with that character appears, rather
 // than eagerly loading all 6 characters × 8 dirs × 4 anims (~192 sheets) up
@@ -275,6 +295,17 @@ export class IsoScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private lastSendTime = 0;
+
+  // ─── Local-avatar prediction (display-only; see PREDICT_* consts) ─────────
+  private readonly predictEnabled = !/[?&]nopredict\b/.test(
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+  private predActive = false;          // prediction currently driving the local avatar
+  private predX = SPAWN_X;             // predicted local tile (lerp target when predActive)
+  private predY = SPAWN_Y;
+  private serverX = SPAWN_X;           // last authoritative tile for the local slot
+  private serverY = SPAWN_Y;
+  private lastPredMoveTime = 0;
 
   // ─── Inertia ───────────────────────────────────────────────────────────
   private wasSprinting = false;
@@ -609,6 +640,9 @@ export class IsoScene extends Phaser.Scene {
     else if (w)      heldDir = 'W';   // NW
     else if (a)      heldDir = 'A';   // SW
 
+    // Keep local-avatar prediction in sync with eligibility before stepping it.
+    this.updatePredictionState();
+
     if (this.currentPhase === RacePhase.Racing && Date.now() - this.lastSendTime >= SEND_INTERVAL) {
       if (heldDir) {
         this.sendMove(heldDir);
@@ -617,6 +651,18 @@ export class IsoScene extends Phaser.Scene {
         if (this.room) this.room.send('move', { direction: this.inertiaDir, sprint: false });
         this.lastSendTime = Date.now();
       }
+    }
+
+    // Settle: once the player stops and no step is in flight, glide the ≤1-tile
+    // residual (a final input the server jitter-rejected) back to truth so the
+    // avatar can't sit permanently one tile ahead of its real position.
+    if (this.predActive && !anyDirHeld && localAv
+        && Date.now() - this.lastPredMoveTime > PREDICT_SETTLE_MS
+        && (this.predX !== this.serverX || this.predY !== this.serverY)) {
+      this.predX = this.serverX;
+      this.predY = this.serverY;
+      localAv.tileX = this.serverX;
+      localAv.tileY = this.serverY;
     }
 
     if (!anyDirHeld && this.wasSprinting) {
@@ -1132,7 +1178,86 @@ export class IsoScene extends Phaser.Scene {
     this.lastSendTime = Date.now();
     const sprint = this.shiftKey?.isDown ?? false;
     if (sprint) { this.wasSprinting = true; this.inertiaDir = direction; }
+    this.tryPredictStep(direction, sprint); // optimistic local step (display-only)
     if (this.room) this.room.send('move', { direction, sprint });
+  }
+
+  // ─── Client-side prediction (local avatar only) ──────────────────────────
+  // See the PREDICT_* consts. The server stays fully authoritative; this only
+  // hides input→motion latency on the LOCAL avatar and always reconciles to the
+  // server truth arriving via `state` (handleSlotChange).
+
+  /**
+   * Whether prediction may drive the local avatar right now. We predict ONLY the
+   * common walk/sprint case; every "surprise" state (frozen, stuck, slow/penalty/
+   * knockback, mid-slide, char not yet loaded, not Racing) defers entirely to the
+   * server so a mispredict can never rubber-band.
+   */
+  private predictionEligible(): boolean {
+    if (!this.predictEnabled) return false;
+    if (this.currentPhase !== RacePhase.Racing) return false;
+    const av = this.avatars.get(this.mySlotIndex);
+    if (!av) return false;
+    if (!this.loadedChars.has(this.charDefFor(av, true).key)) return false;
+    if (av.frozen || av.stuck || av.penalized || av.knockbackSlowed) return false;
+    if (av.currentTerrain === Terrain.Slow || av.currentTerrain === Terrain.Slide) return false;
+    return true;
+  }
+
+  /**
+   * Keep `predActive` in sync with eligibility and re-anchor the prediction to
+   * the server truth whenever it (re)activates, so it never resumes from a stale
+   * predicted tile. Called once per frame from update().
+   */
+  private updatePredictionState(): void {
+    const eligible = this.predictionEligible();
+    if (eligible && !this.predActive) {
+      this.predX = this.serverX;
+      this.predY = this.serverY;
+      this.lastPredMoveTime = 0;
+    }
+    this.predActive = eligible;
+  }
+
+  /**
+   * Optimistically advance the local avatar one tile before the server confirms.
+   * Self-gated to the server move cadence and capped to PREDICT_MAX_LEAD tiles
+   * ahead of the last server-confirmed position, so a wrong guess can never drift
+   * more than one tile before reconciliation snaps it. Legality mirrors the
+   * server: bounds + walls (from localTerrain) + not stepping onto a tile another
+   * player occupies (the server would turn that into a push). Anything the client
+   * can't know (hidden cooldown, off-screen collisions) simply reconciles next state.
+   */
+  private tryPredictStep(direction: string, sprint: boolean): void {
+    if (!this.predictionEligible()) return;
+    const now = Date.now();
+    const cd = sprint ? PREDICT_SPRINT_COOLDOWN : PREDICT_COOLDOWN;
+    if (now - this.lastPredMoveTime < cd) return;
+
+    const delta = MOVE_DELTAS[direction];
+    if (!delta) return;
+    const nx = Math.max(0, Math.min(GRID_COLS - 1, this.predX + delta[0]));
+    const ny = Math.max(0, Math.min(GRID_ROWS - 1, this.predY + delta[1]));
+    if (nx === this.predX && ny === this.predY) return;                 // clamped at edge
+    if (this.localTerrain[ny]?.[nx] === Terrain.Wall) return;           // wall (client-known)
+    if (Math.max(Math.abs(nx - this.serverX), Math.abs(ny - this.serverY)) > PREDICT_MAX_LEAD) return; // don't outrun server
+    if (this.tileOccupiedByOther(nx, ny)) return;                        // let the server resolve pushes
+
+    this.predX = nx;
+    this.predY = ny;
+    this.lastPredMoveTime = now;
+    const av = this.avatars.get(this.mySlotIndex)!;
+    av.tileX = nx;                     // drive the lerp toward the predicted tile
+    av.tileY = ny;
+    av.lastTileChange = performance.now();
+  }
+
+  private tileOccupiedByOther(x: number, y: number): boolean {
+    for (const [idx, a] of this.avatars) {
+      if (idx === this.mySlotIndex) continue;
+      if (a.tileX === x && a.tileY === y) return true;
+    }
+    return false;
   }
 
   // ─── Avatar management ─────────────────────────────────────────────────
@@ -1159,11 +1284,40 @@ export class IsoScene extends Phaser.Scene {
       const av = this.avatars.get(index)!;
       const newX = slot.tileX as number;
       const newY = slot.tileY as number;
-      if (newX !== av.tileX || newY !== av.tileY) {
-        av.lastTileChange = performance.now();
+      const isLocal = index === this.mySlotIndex;
+
+      if (isLocal) {
+        // Track the authoritative tile so prediction can reconcile against it.
+        this.serverX = newX;
+        this.serverY = newY;
       }
-      av.tileX = newX;
-      av.tileY = newY;
+
+      if (isLocal && this.predActive && !isNew) {
+        // Prediction is driving the local avatar. Trust it while the server is
+        // within PREDICT_MAX_LEAD (that gap is just the in-flight move); hard-snap
+        // only on a real divergence — collision, hole, push, or a mispredict.
+        const diverged =
+          Math.abs(this.predX - newX) > PREDICT_MAX_LEAD ||
+          Math.abs(this.predY - newY) > PREDICT_MAX_LEAD;
+        if (diverged) {
+          this.predX = newX;
+          this.predY = newY;
+        }
+        if (this.predX !== av.tileX || this.predY !== av.tileY) {
+          av.lastTileChange = performance.now();
+        }
+        av.tileX = this.predX;
+        av.tileY = this.predY;
+      } else {
+        if (newX !== av.tileX || newY !== av.tileY) {
+          av.lastTileChange = performance.now();
+        }
+        av.tileX = newX;
+        av.tileY = newY;
+        // Keep the prediction anchored while it isn't driving, so it resumes clean.
+        if (isLocal) { this.predX = newX; this.predY = newY; }
+      }
+
       if (isNew) {
         av.displayX = newX;
         av.displayY = newY;
@@ -1189,8 +1343,7 @@ export class IsoScene extends Phaser.Scene {
       av.sprinting = slot.sprinting ?? false;
       av.immune = slot.immune ?? false;
 
-      // Update sprite animation & tint
-      const isLocal = slot.sessionId === this.mySessionId;
+      // Update sprite animation & tint (isLocal computed above)
       this.updateAvatarVisual(av, isLocal);
     } else {
       const av = this.avatars.get(index);
