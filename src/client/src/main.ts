@@ -3,6 +3,7 @@ import { TitleScene } from './TitleScene';
 import { LobbyScene } from './LobbyScene';
 import { IsoScene } from './IsoScene';
 import { installVolumeControl } from './volumeControl';
+import { installOrientationNudge } from './mobile';
 
 // Dev mode: add ?dev to URL to skip login and go straight to race.
 // Lobby preview: add ?lobby to boot straight into the lobby (no server/login
@@ -37,9 +38,14 @@ const game = new Phaser.Game(config);
 // final canvas upscale; internal rendering stays crisp.
 game.events.once(Phaser.Core.Events.READY, () => {
   game.canvas.style.imageRendering = 'auto';
+  // Touch devices: stop the browser hijacking drags/double-tap so the on-screen
+  // joystick and buttons get every touch. Harmless on desktop.
+  game.canvas.style.touchAction = 'none';
 });
 // Global audio control — persists across every scene (title → lobby → race).
 installVolumeControl(game);
+// Mobile: show a "rotate to landscape" nudge in portrait (touch devices only).
+installOrientationNudge();
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;
 

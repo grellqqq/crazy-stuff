@@ -8,6 +8,8 @@ import {
 } from '../../shared/terrain';
 import { ITEMS, equipmentBodyKey } from '../../shared/items';
 import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META } from './itemDisplay';
+import { TouchControls } from './TouchControls';
+import { isTouchDevice } from './mobile';
 // Per-frame base head-position deltas (run/jump vs walk), baked from the base
 // bodies — see tools that write headOffsets.json. Lets head accessories without
 // their own run/jump frames ride the head instead of drifting.
@@ -307,6 +309,9 @@ export class IsoScene extends Phaser.Scene {
   private serverY = SPAWN_Y;
   private lastPredMoveTime = 0;
 
+  // On-screen touch controller (mobile only; null on desktop).
+  private touchControls: TouchControls | null = null;
+
   // ─── Inertia ───────────────────────────────────────────────────────────
   private wasSprinting = false;
   private inertiaRemaining = 0;
@@ -456,6 +461,14 @@ export class IsoScene extends Phaser.Scene {
     this.staminaBarBg = this.add.graphics().setScrollFactor(0).setDepth(9999);
     this.staminaBarFill = this.add.graphics().setScrollFactor(0).setDepth(9999);
     this.setupInput();
+    // Mobile: on-screen joystick + Jump/Use buttons. Feeds the same movement
+    // path as the keyboard (so touch gets prediction too). Desktop = null.
+    if (isTouchDevice()) {
+      this.touchControls = new TouchControls(this, {
+        onJump: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('jump'); },
+        onUse: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('usePickup'); },
+      });
+    }
     this.addHud();
     this.connectToRace().catch(console.error);
 
@@ -471,6 +484,9 @@ export class IsoScene extends Phaser.Scene {
     if (this.profileHud) { this.profileHud.remove(); this.profileHud = null; }
     if (this.inventoryPanel) { this.inventoryPanel.remove(); this.inventoryPanel = null; }
     if (this.inventoryBtn) { this.inventoryBtn.parentElement?.remove(); this.inventoryBtn = null; }
+
+    // Destroy touch controller (unbinds its pointer handlers)
+    if (this.touchControls) { this.touchControls.destroy(); this.touchControls = null; }
 
     // Leave multiplayer room
     if (this.room) { this.room.leave(); this.room = null; }
@@ -640,6 +656,14 @@ export class IsoScene extends Phaser.Scene {
     else if (w)      heldDir = 'W';   // NW
     else if (a)      heldDir = 'A';   // SW
 
+    // On-screen joystick (mobile) overrides the keyboard when engaged, and is
+    // only shown while racing. `anyHeld` folds touch into the keyboard-derived
+    // held state so inertia/settle logic works for both input methods.
+    const touch = this.touchControls?.getInput();
+    if (touch?.dir) heldDir = touch.dir;
+    const anyHeld = anyDirHeld || !!touch?.dir;
+    if (this.touchControls) this.touchControls.setVisible(this.currentPhase === RacePhase.Racing);
+
     // Keep local-avatar prediction in sync with eligibility before stepping it.
     this.updatePredictionState();
 
@@ -656,7 +680,7 @@ export class IsoScene extends Phaser.Scene {
     // Settle: once the player stops and no step is in flight, glide the ≤1-tile
     // residual (a final input the server jitter-rejected) back to truth so the
     // avatar can't sit permanently one tile ahead of its real position.
-    if (this.predActive && !anyDirHeld && localAv
+    if (this.predActive && !anyHeld && localAv
         && Date.now() - this.lastPredMoveTime > PREDICT_SETTLE_MS
         && (this.predX !== this.serverX || this.predY !== this.serverY)) {
       this.predX = this.serverX;
@@ -665,11 +689,11 @@ export class IsoScene extends Phaser.Scene {
       localAv.tileY = this.serverY;
     }
 
-    if (!anyDirHeld && this.wasSprinting) {
+    if (!anyHeld && this.wasSprinting) {
       this.wasSprinting = false;
       this.inertiaRemaining = 2;
     }
-    if (anyDirHeld) this.inertiaRemaining = 0;
+    if (anyHeld) this.inertiaRemaining = 0;
 
     if (localAv) this.localStamina = localAv.stamina;
     this.renderStaminaBar();
@@ -1176,7 +1200,8 @@ export class IsoScene extends Phaser.Scene {
     if (this.currentPhase !== RacePhase.Racing) return;
     this.playerFacing = direction;
     this.lastSendTime = Date.now();
-    const sprint = this.shiftKey?.isDown ?? false;
+    // Sprint from Shift (keyboard) OR the joystick pushed to its outer ring (touch).
+    const sprint = (this.shiftKey?.isDown ?? false) || (this.touchControls?.getInput().sprint ?? false);
     if (sprint) { this.wasSprinting = true; this.inertiaDir = direction; }
     this.tryPredictStep(direction, sprint); // optimistic local step (display-only)
     if (this.room) this.room.send('move', { direction, sprint });
@@ -2794,11 +2819,15 @@ export class IsoScene extends Phaser.Scene {
   }
 
   private addHud(): void {
-    this.add
-      .text(10, 10, 'WASD · SHIFT sprint · SPACE jump · E pickup · I inventory', {
-        fontSize: '14px', color: '#aabbcc', backgroundColor: '#00000066', padding: { x: 8, y: 4 },
-      })
-      .setScrollFactor(0).setDepth(9999);
+    // Keyboard hint — irrelevant (and misleading) on touch, where the on-screen
+    // joystick + buttons are the controls.
+    if (!isTouchDevice()) {
+      this.add
+        .text(10, 10, 'WASD · SHIFT sprint · SPACE jump · E pickup · I inventory', {
+          fontSize: '14px', color: '#aabbcc', backgroundColor: '#00000066', padding: { x: 8, y: 4 },
+        })
+        .setScrollFactor(0).setDepth(9999);
+    }
 
     this.createInventoryButton();
 
