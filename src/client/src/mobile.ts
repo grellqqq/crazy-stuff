@@ -9,6 +9,36 @@
  * portrait, since the race track is wide and only reads well in landscape.
  */
 
+/**
+ * Inject a small stylesheet that makes the lobby's desktop-sized DOM panels fit
+ * a phone. Centered modals (inventory, profile, gacha, shop, leaderboard, queue)
+ * all carry `transform: translate(-50%,-50%)` inline, so one attribute selector
+ * reins them all in — no per-panel edits. `!important` beats the inline widths.
+ * Scoped to narrow viewports so desktop is untouched.
+ */
+export function installMobileStyles(): void {
+  if (document.getElementById('cs-mobile-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'cs-mobile-styles';
+  style.textContent = `
+    @media (max-width: 1024px) {
+      /* Centered modal panels */
+      body > div[style*="translate(-50%"] {
+        width: 94vw !important;
+        max-width: 560px !important;
+        max-height: 90vh !important;
+        box-sizing: border-box !important;
+        overflow-y: auto !important;
+        padding: 16px !important;
+      }
+      /* Chat: shrink so it doesn't dominate or crowd the joystick */
+      #chat-box { width: 40vw !important; max-width: 230px !important; bottom: 6px !important; left: 6px !important; }
+      #chat-box #chat-messages { height: 84px !important; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export function isTouchDevice(): boolean {
   const params = new URLSearchParams(window.location.search);
   if (params.has('notouch')) return false;

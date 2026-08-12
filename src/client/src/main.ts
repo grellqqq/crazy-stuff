@@ -3,7 +3,7 @@ import { TitleScene } from './TitleScene';
 import { LobbyScene } from './LobbyScene';
 import { IsoScene } from './IsoScene';
 import { installVolumeControl } from './volumeControl';
-import { installOrientationNudge } from './mobile';
+import { installOrientationNudge, installMobileStyles } from './mobile';
 
 // Dev mode: add ?dev to URL to skip login and go straight to race.
 // Lobby preview: add ?lobby to boot straight into the lobby (no server/login
@@ -44,7 +44,8 @@ game.events.once(Phaser.Core.Events.READY, () => {
 });
 // Global audio control — persists across every scene (title → lobby → race).
 installVolumeControl(game);
-// Mobile: show a "rotate to landscape" nudge in portrait (touch devices only).
+// Mobile: responsive panel sizing + a "rotate to landscape" nudge in portrait.
+installMobileStyles();
 installOrientationNudge();
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;

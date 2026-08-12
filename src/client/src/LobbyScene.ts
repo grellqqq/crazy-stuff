@@ -4,6 +4,8 @@ import { ITEMS, equipmentBodyKey } from '../../shared/items';
 import { seasonLabel } from '../../shared/season';
 import { buildEquipSlot, buildBagCard, SLOT_META as ITEM_SLOT_META, drawItemThumbnail, RARITY_COLORS, preloadThumbnails } from './itemDisplay';
 import { gachaTick, gachaReveal } from './gachaSfx';
+import { TouchControls, dirToWasd } from './TouchControls';
+import { isTouchDevice } from './mobile';
 
 // East-side direction suffixes the body actually renders (west mirrors east
 // via flipX). Equipment overlays load the same five and mirror identically.
@@ -143,6 +145,7 @@ export class LobbyScene extends Phaser.Scene {
 
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private eKey!: Phaser.Input.Keyboard.Key;
+  private touchControls: TouchControls | null = null;
 
   private buildingX = 0;
   private buildingY = 0;
@@ -456,17 +459,7 @@ export class LobbyScene extends Phaser.Scene {
       D: kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
     this.eKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-    this.eKey.on('down', () => {
-      // Gacha machine takes priority when in range (it's the nearer object on its side).
-      const dGacha = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.gachaX, this.gachaY);
-      if (dGacha <= INTERACT_DIST) { this.toggleGacha(); return; }
-      const dBoard = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.boardX, this.boardY);
-      if (dBoard <= INTERACT_DIST) { this.toggleLeaderboard(); return; }
-      const dShop = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.shopX, this.shopY);
-      if (dShop <= INTERACT_DIST) { this.toggleShop(); return; }
-      const dRace = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.buildingX, this.buildingY);
-      if (dRace <= INTERACT_DIST) this.enterRace();
-    });
+    this.eKey.on('down', () => this.tryInteract());
 
     const iKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.I);
     iKey.on('down', () => this.toggleInventory());
@@ -477,10 +470,23 @@ export class LobbyScene extends Phaser.Scene {
       if (input) input.focus();
     });
 
-    // WASD hint
-    this.add.text(10, height - 30, 'WASD move · E interact · P profile · I inventory · Enter chat', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#555',
-    }).setScrollFactor(0).setDepth(D_PROMPT);
+    // WASD hint (desktop only — misleading on touch, where the joystick rules)
+    if (!isTouchDevice()) {
+      this.add.text(10, height - 30, 'WASD move · E interact · P profile · I inventory · Enter chat', {
+        fontSize: '12px', fontFamily: 'monospace', color: '#555',
+      }).setScrollFactor(0).setDepth(D_PROMPT);
+    }
+
+    // Mobile: joystick to walk + a context INTERACT button (mirrors the E key).
+    if (isTouchDevice()) {
+      this.touchControls = new TouchControls(this, {
+        buttons: [
+          { key: 'GO', cx: 1195, cy: 470, r: 64, fill: 0x1f5a8a, stroke: 0x4488ff,
+            action: () => this.tryInteract() },
+        ],
+      });
+      this.touchControls.setButtonVisible('GO', false); // shown only when near something
+    }
 
     // Chat box (always visible)
     this.createChatBox();
@@ -506,10 +512,12 @@ export class LobbyScene extends Phaser.Scene {
     this.updateNpcs(delta);
     const speed = MOVE_SPEED * (delta / 1000);
 
-    const w = this.keys.W.isDown;
-    const a = this.keys.A.isDown;
-    const s = this.keys.S.isDown;
-    const d = this.keys.D.isDown;
+    // Keyboard OR the on-screen joystick (mobile), mapped to WASD equivalents.
+    const jw = this.touchControls ? dirToWasd(this.touchControls.getInput().dir) : null;
+    const w = this.keys.W.isDown || !!jw?.w;
+    const a = this.keys.A.isDown || !!jw?.a;
+    const s = this.keys.S.isDown || !!jw?.s;
+    const d = this.keys.D.isDown || !!jw?.d;
 
     let dx = 0, dy = 0;
     if (w) dy -= 1;
@@ -588,6 +596,28 @@ export class LobbyScene extends Phaser.Scene {
     this.boardPrompt.setAlpha(dBoard <= INTERACT_DIST ? 1 : 0);
     const dShop = Phaser.Math.Distance.Between(this.playerX, this.playerY, this.shopX, this.shopY);
     this.shopPrompt.setAlpha(dShop <= INTERACT_DIST ? 1 : 0);
+
+    // Mobile: show the GO button only when standing next to something to use.
+    if (this.touchControls) this.touchControls.setButtonVisible('GO', this.nearInteractable());
+  }
+
+  /** Dispatch the nearest in-range interaction — shared by the E key and the
+   *  mobile GO button. Gacha takes priority on its side (nearer object). */
+  private tryInteract(): void {
+    const near = (x: number, y: number) =>
+      Phaser.Math.Distance.Between(this.playerX, this.playerY, x, y) <= INTERACT_DIST;
+    if (near(this.gachaX, this.gachaY)) { this.toggleGacha(); return; }
+    if (near(this.boardX, this.boardY)) { this.toggleLeaderboard(); return; }
+    if (near(this.shopX, this.shopY)) { this.toggleShop(); return; }
+    if (near(this.buildingX, this.buildingY)) this.enterRace();
+  }
+
+  /** True when close enough to interact with any building (drives the GO button). */
+  private nearInteractable(): boolean {
+    const near = (x: number, y: number) =>
+      Phaser.Math.Distance.Between(this.playerX, this.playerY, x, y) <= INTERACT_DIST;
+    return near(this.gachaX, this.gachaY) || near(this.boardX, this.boardY)
+      || near(this.shopX, this.shopY) || near(this.buildingX, this.buildingY);
   }
 
   private resolveDir(w: boolean, a: boolean, s: boolean, d: boolean): string {
@@ -2144,6 +2174,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private cleanupScene(): void {
+    if (this.touchControls) { this.touchControls.destroy(); this.touchControls = null; }
     if (this.editorPanel) { this.editorPanel.remove(); this.editorPanel = null; }
     if (this.profilePanel) { this.profilePanel.remove(); this.profilePanel = null; }
     const hudBtns = document.getElementById('hud-buttons');

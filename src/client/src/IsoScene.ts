@@ -465,8 +465,13 @@ export class IsoScene extends Phaser.Scene {
     // path as the keyboard (so touch gets prediction too). Desktop = null.
     if (isTouchDevice()) {
       this.touchControls = new TouchControls(this, {
-        onJump: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('jump'); },
-        onUse: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('usePickup'); },
+        enableSprint: true,
+        buttons: [
+          { key: 'JUMP', cx: 1195, cy: 400, r: 60, fill: 0x2a6a2a, stroke: 0x66cc66,
+            action: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('jump'); } },
+          { key: 'USE', cx: 1195, cy: 530, r: 50, fill: 0x553388, stroke: 0xaa66ff,
+            action: () => { if (this.room && this.currentPhase === RacePhase.Racing) this.room.send('usePickup'); } },
+        ],
       });
     }
     this.addHud();
