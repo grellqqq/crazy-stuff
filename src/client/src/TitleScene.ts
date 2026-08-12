@@ -9,6 +9,8 @@ export class TitleScene extends Phaser.Scene {
   private bgMusic: Phaser.Sound.BaseSound | null = null;
   private authState: import('./auth').AuthState | null = null;
   private electricTimer: Phaser.Time.TimerEvent | null = null;
+  private startInputArmed = false;
+  private domAdvance: (() => void) | null = null;
 
   constructor() {
     super({ key: 'TitleScene' });
@@ -59,8 +61,7 @@ export class TitleScene extends Phaser.Scene {
         targets: hint, alpha: 0.35, duration: 900, yoyo: true, repeat: -1,
         ease: 'Sine.easeInOut',
       });
-      this.input.keyboard?.once('keydown', () => this.startGame());
-      this.input.once('pointerdown', () => this.startGame());
+      this.armStartInput();
     }
 
     // Phase 1: Draw thick pipe frames + fireworks
@@ -221,9 +222,28 @@ export class TitleScene extends Phaser.Scene {
       });
 
       // Accept input
-      this.input.keyboard?.on('keydown', () => this.startGame());
-      this.input.on('pointerdown', () => this.startGame());
+      this.armStartInput();
     });
+  }
+
+  /**
+   * Arm "any input advances" for the title. Uses Phaser's keyboard + canvas
+   * pointer events AND a DOM-level touch/pointer fallback on window. The DOM
+   * fallback is what makes this work on phones: some mobile browsers don't
+   * deliver a canvas tap to Phaser's pointer input, which left mobile players
+   * stuck on "press any key" — but a window touchstart always fires (it's the
+   * same reliable path the "click to enter" splash uses). Idempotent; the
+   * listeners are torn down in startGame().
+   */
+  private armStartInput(): void {
+    if (this.startInputArmed) return;
+    this.startInputArmed = true;
+    const advance = () => this.startGame();
+    this.input.keyboard?.on('keydown', advance);
+    this.input.on('pointerdown', advance);
+    this.domAdvance = advance;
+    window.addEventListener('pointerdown', advance);
+    window.addEventListener('touchstart', advance, { passive: true });
   }
 
   private waitForClick(width: number, height: number): Promise<void> {
@@ -256,6 +276,13 @@ export class TitleScene extends Phaser.Scene {
   private startGame(): void {
     if (this.started) return;
     this.started = true;
+
+    // Tear down the DOM-level advance fallback (armStartInput).
+    if (this.domAdvance) {
+      window.removeEventListener('pointerdown', this.domAdvance);
+      window.removeEventListener('touchstart', this.domAdvance);
+      this.domAdvance = null;
+    }
 
     if (this.electricTimer) this.electricTimer.destroy();
     this.cameras.main.flash(400, 255, 220, 50);
