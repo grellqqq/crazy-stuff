@@ -22,14 +22,27 @@ export function installMobileStyles(): void {
   style.id = 'cs-mobile-styles';
   style.textContent = `
     @media (max-width: 1024px) {
-      /* Centered modal panels */
+      /* Centered modal panels (inventory, shop, gacha, leaderboard, queue):
+         keep their designed width but never exceed the screen, and scroll. */
       body > div[style*="translate(-50%"] {
-        width: 94vw !important;
-        max-width: 560px !important;
+        max-width: 94vw !important;
         max-height: 90vh !important;
         box-sizing: border-box !important;
         overflow-y: auto !important;
-        padding: 16px !important;
+      }
+      /* Profile panel is pinned top-right with no built-in scroll — constrain it. */
+      #profile-panel {
+        max-width: 88vw !important;
+        max-height: 84vh !important;
+        overflow-y: auto !important;
+        box-sizing: border-box !important;
+      }
+      /* Bigger tap target for the transparent close 'X' in those panels. */
+      body > div[style*="translate(-50%"] button[style*="background: none"],
+      #profile-panel button[style*="background: none"] {
+        font-size: 26px !important;
+        padding: 4px 14px !important;
+        line-height: 1 !important;
       }
       /* Chat: shrink so it doesn't dominate or crowd the joystick */
       #chat-box { width: 40vw !important; max-width: 230px !important; bottom: 6px !important; left: 6px !important; }
