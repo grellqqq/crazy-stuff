@@ -250,7 +250,11 @@ export class IsoScene extends Phaser.Scene {
   private tileGfx!: Phaser.GameObjects.Graphics;
   private finishGfx!: Phaser.GameObjects.Graphics;
   /** Tile sprite images — 2D array [ty][tx] for texture-based rendering. */
-  private tileImages: (Phaser.GameObjects.Image | null)[][] = [];
+  // Per-tile GameObjects (wall sprites, button plates + spark emitters, floor
+  // images) keyed "tx,ty". Tracked PER TILE so a terrain change rebuilds only the
+  // affected tiles instead of the whole 5,400-tile grid. Holes + borders are
+  // vector-drawn on the shared tileGfx (redrawn wholesale — cheap, one draw call).
+  private tileObjects = new Map<string, Phaser.GameObjects.GameObject[]>();
   /** Processed tile texture keys per terrain type. */
   private tileTextureReady = false;
 
@@ -276,7 +280,6 @@ export class IsoScene extends Phaser.Scene {
   private slimeGfx!: Phaser.GameObjects.Graphics;
   private slimeZones: { x: number; y: number; size: number }[] = [];
   private pickupTweens: Phaser.Tweens.Tween[] = [];
-  private extraTileSprites: Phaser.GameObjects.GameObject[] = [];
 
   // ─── Crumble warnings ────────────────────────────────────────────────────
   private crumbleWarnings = new Map<string, number>();
@@ -507,15 +510,9 @@ export class IsoScene extends Phaser.Scene {
     for (const t of this.pickupTweens) t.destroy();
     this.pickupTweens = [];
 
-    // Destroy extra tile sprites (wall floors, button floors)
-    for (const s of this.extraTileSprites) s.destroy();
-    this.extraTileSprites = [];
-
-    // Destroy tile image grid
-    for (const row of this.tileImages) {
-      for (const img of row) { if (img) img.destroy(); }
-    }
-    this.tileImages = [];
+    // Destroy per-tile GameObjects (wall/button/floor sprites + spark emitters)
+    for (const objs of this.tileObjects.values()) for (const o of objs) o.destroy();
+    this.tileObjects.clear();
 
     // Destroy button labels
     for (const l of this.buttonLabels) l.destroy();
@@ -729,37 +726,46 @@ export class IsoScene extends Phaser.Scene {
     this.tileGfx.setDepth(-1);
   }
 
+  /** Full rebuild: the whole vector layer + every tile's GameObjects. Used on
+   *  first map load and full resets. Terrain changes mid-race use updateTiles(). */
   private renderAllTiles(): void {
-    this.tileGfx.clear();
+    for (const objs of this.tileObjects.values()) for (const o of objs) o.destroy();
+    this.tileObjects.clear();
 
-    // Destroy old extra tile sprites (wall floors, button floors)
-    for (const s of this.extraTileSprites) s.destroy();
-    this.extraTileSprites = [];
-
-    // Destroy old tile images
-    for (const row of this.tileImages) {
-      if (!row) continue;
-      for (const img of row) if (img) img.destroy();
-    }
-    this.tileImages = [];
-
+    this.redrawVectorLayer();
     for (let ty = 0; ty < GRID_ROWS; ty++) {
-      this.tileImages[ty] = [];
-      for (let tx = 0; tx < GRID_COLS; tx++) {
-        this.tileImages[ty][tx] = this.renderTile(tx, ty);
-      }
+      for (let tx = 0; tx < GRID_COLS; tx++) this.createTileObjects(tx, ty);
     }
   }
 
-  /** Re-render only specific tiles (avoids full re-render for terrain changes). */
-  private renderTilesAt(tiles: { tileX: number; tileY: number }[]): void {
+  /**
+   * Incremental terrain update. Rebuilds the GameObjects of ONLY the changed
+   * tiles (walls/buttons/floors — the expensive part, esp. button particle
+   * emitters), then redraws the shared vector layer (holes + borders) wholesale.
+   * The vector redraw is immediate-mode Graphics — a single cheap CPU pass with
+   * no GameObject churn — and it must be full because a tile's borders depend on
+   * its neighbours and a shared Graphics can't erase one tile's contribution.
+   */
+  private updateTiles(tiles: { tileX: number; tileY: number }[]): void {
     for (const { tileX, tileY } of tiles) {
-      const old = this.tileImages[tileY]?.[tileX];
-      if (old) old.destroy();
-      if (this.tileImages[tileY]) {
-        this.tileImages[tileY][tileX] = this.renderTile(tileX, tileY);
-      }
+      this.destroyTileObjects(tileX, tileY);
+      this.createTileObjects(tileX, tileY);
     }
+    this.redrawVectorLayer();
+  }
+
+  /** Clear + redraw the shared vector layer (hole fills + terrain borders). */
+  private redrawVectorLayer(): void {
+    this.tileGfx.clear();
+    for (let ty = 0; ty < GRID_ROWS; ty++) {
+      for (let tx = 0; tx < GRID_COLS; tx++) this.drawTileVector(tx, ty);
+    }
+  }
+
+  private destroyTileObjects(tx: number, ty: number): void {
+    const key = `${tx},${ty}`;
+    const objs = this.tileObjects.get(key);
+    if (objs) { for (const o of objs) o.destroy(); this.tileObjects.delete(key); }
   }
 
   /**
@@ -875,12 +881,13 @@ export class IsoScene extends Phaser.Scene {
     }
   }
 
-  private renderTile(tx: number, ty: number): Phaser.GameObjects.Image | null {
+  /** VECTOR pass — draws hole fills and terrain borders onto the shared tileGfx.
+   *  No GameObjects; safe to re-run for the whole grid on any change. */
+  private drawTileVector(tx: number, ty: number): void {
     const terrain = this.localTerrain[ty]?.[tx] ?? Terrain.Normal;
     const { x, y } = tileToScreen(tx, ty);
     const sx = this.originX + x;
     const sy = this.originY + y;
-    const tileDepth = isoDepth(tx, ty);
 
     // Hole: dark void with layered depth effect
     if (terrain === Terrain.Hole) {
@@ -907,8 +914,25 @@ export class IsoScene extends Phaser.Scene {
       this.tileGfx.lineTo(pts[0].x, pts[0].y + 3);
       this.tileGfx.lineTo(pts[1].x - 4, pts[1].y);
       this.tileGfx.strokePath();
-      return null;
+      return;
     }
+
+    // Textured floors (slow/ice/rocky) draw a border where they meet a neighbour
+    // of a different terrain — same condition as their GameObject in createTileObjects.
+    if (this.tileTextureReady && this.TERRAIN_TILE_MAP[terrain]) {
+      this.drawTerrainBorders(tx, ty, terrain, sx, sy);
+    }
+  }
+
+  /** GAMEOBJECT pass — creates the wall/button/floor sprites for a tile and
+   *  registers them in tileObjects[`${tx},${ty}`] for per-tile teardown. */
+  private createTileObjects(tx: number, ty: number): void {
+    const terrain = this.localTerrain[ty]?.[tx] ?? Terrain.Normal;
+    const { x, y } = tileToScreen(tx, ty);
+    const sx = this.originX + x;
+    const sy = this.originY + y;
+    const tileDepth = isoDepth(tx, ty);
+    const objs: Phaser.GameObjects.GameObject[] = [];
 
     // Wall: stacked crates (4 variations based on position)
     if (terrain === Terrain.Wall) {
@@ -917,19 +941,15 @@ export class IsoScene extends Phaser.Scene {
       wallSprite.setScale(0.342);
       wallSprite.setOrigin(0.5, 0.78);
       wallSprite.setDepth(tileDepth + 0.5);
-      this.extraTileSprites.push(wallSprite);
-      return wallSprite as unknown as Phaser.GameObjects.Image;
-    }
-
-    // Button: electric plate with spark particles
-    if (terrain === Terrain.Button) {
+      objs.push(wallSprite);
+    } else if (terrain === Terrain.Button) {
+      // Electric plate + spark particle emitter
       const plate = this.add.image(sx, sy + TILE_H / 2, 'button_electric');
       plate.setScale(0.75);
       plate.setOrigin(0.5, 0.5);
       plate.setDepth(tileDepth + 0.1);
-      this.extraTileSprites.push(plate);
+      objs.push(plate);
 
-      // Electric sparkle particles
       const sparks = this.add.particles(sx, sy + TILE_H / 2, 'particle', {
         speed: { min: 20, max: 60 },
         scale: { start: 0.8, end: 0 },
@@ -942,31 +962,20 @@ export class IsoScene extends Phaser.Scene {
         gravityY: -25,
       });
       sparks.setDepth(tileDepth + 0.2);
-      this.extraTileSprites.push(sparks as unknown as Phaser.GameObjects.GameObject);
-
-      return plate;
-    }
-
-    // Normal terrain: background image shows through
-    if (terrain === Terrain.Normal) {
-      return null;
-    }
-
-    // Textured floor tile (non-Normal terrain)
-    if (this.tileTextureReady) {
+      objs.push(sparks);
+    } else if (terrain !== Terrain.Normal && terrain !== Terrain.Hole && this.tileTextureReady) {
+      // Textured floor tile (slow/ice/rocky)
       const tileDef = this.TERRAIN_TILE_MAP[terrain];
       if (tileDef) {
         const frameIdx = tileDef.frames[(tx + ty * 3) % tileDef.frames.length];
         const img = this.add.image(sx, sy + TILE_H / 2, tileDef.key, frameIdx);
         img.setScale(0.5);
         img.setDepth(-1);
-        this.drawTerrainBorders(tx, ty, terrain, sx, sy);
-        return img;
+        objs.push(img);
       }
     }
 
-    // Fallback: background shows through
-    return null;
+    if (objs.length) this.tileObjects.set(`${tx},${ty}`, objs);
   }
 
   /** Draw border edges where terrain type changes between adjacent tiles. */
@@ -2243,7 +2252,7 @@ export class IsoScene extends Phaser.Scene {
 
     room.onMessage('terrainChange', (data: { tileX: number; tileY: number; terrain: number }) => {
       this.localTerrain[data.tileY][data.tileX] = data.terrain;
-      this.renderAllTiles();
+      this.updateTiles([{ tileX: data.tileX, tileY: data.tileY }]);
       this.renderMinimap();
     });
 
@@ -2251,7 +2260,7 @@ export class IsoScene extends Phaser.Scene {
       for (const c of changes) {
         this.localTerrain[c.tileY][c.tileX] = c.terrain;
       }
-      this.renderAllTiles();
+      this.updateTiles(changes);
       this.renderMinimap();
     });
 
