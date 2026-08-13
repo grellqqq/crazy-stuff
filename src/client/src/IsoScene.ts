@@ -315,6 +315,11 @@ export class IsoScene extends Phaser.Scene {
   // On-screen touch controller (mobile only; null on desktop).
   private touchControls: TouchControls | null = null;
 
+  // ─── Game-feel (juice) ───────────────────────────────────────────────────
+  private lastFootstepTime = 0;
+  private camLeadX = 0;   // eased camera look-ahead offset (screen px)
+  private camLeadY = 0;
+
   // ─── Inertia ───────────────────────────────────────────────────────────
   private wasSprinting = false;
   private inertiaRemaining = 0;
@@ -629,10 +634,30 @@ export class IsoScene extends Phaser.Scene {
 
     this.updatePickupHud();
 
-    // Camera follow
+    // Camera follow, with a gentle eased look-ahead toward the facing direction.
     if (localAv) {
       const { x, y } = tileToScreen(localAv.displayX, localAv.displayY);
-      this.cameras.main.centerOn(this.originX + x, this.originY + y + TILE_H / 2);
+      const localMoving = Math.abs(localAv.tileX - localAv.displayX) > 0.02
+        || Math.abs(localAv.tileY - localAv.displayY) > 0.02
+        || (Date.now() - this.lastSendTime < 300);
+      const lead = localMoving ? this.facingScreenLead(this.playerFacing) : { x: 0, y: 0 };
+      this.camLeadX += (lead.x - this.camLeadX) * 0.05;
+      this.camLeadY += (lead.y - this.camLeadY) * 0.05;
+      this.cameras.main.centerOn(
+        this.originX + x + this.camLeadX,
+        this.originY + y + TILE_H / 2 + this.camLeadY,
+      );
+
+      // Footstep dust while grounded and moving (kicks up faster when sprinting).
+      if (this.currentPhase === RacePhase.Racing && localAv.jumpOffset > -2) {
+        const cadence = (localAv.sprinting || localAv.speedBoosted) ? 130 : 240;
+        if (localMoving && Date.now() - this.lastFootstepTime > cadence) {
+          this.lastFootstepTime = Date.now();
+          this.emitDust(this.originX + x, this.originY + y + TILE_H / 2,
+            isoDepth(localAv.displayX, localAv.displayY) - 0.1,
+            (localAv.sprinting || localAv.speedBoosted) ? 3 : 2);
+        }
+      }
     }
 
     this.renderCrumbleWarnings(_time);
@@ -1369,6 +1394,7 @@ export class IsoScene extends Phaser.Scene {
       if (newFrozen && !av.frozen && slot.sessionId === this.mySessionId) {
         this.sfxHoleFall();
         this.emitAtPlayer(0xff2222, 15);
+        this.cameraShake(0.008, 220);
       }
       av.frozen = newFrozen;
       av.penalized = slot.penalized ?? false;
@@ -1788,10 +1814,12 @@ export class IsoScene extends Phaser.Scene {
     const sx = this.originX + x;
     const sy = this.originY + y + TILE_H / 2; // center of single tile
 
-    // Shadow ellipse at feet level
+    // Shadow ellipse at feet level — shrinks/fades as the avatar rises (jump).
+    const jh = Math.min(1, -av.jumpOffset / 16);
+    const ss = 1 - jh * 0.45;
     av.shadow.clear();
-    av.shadow.fillStyle(0x000000, 0.3);
-    av.shadow.fillEllipse(sx, sy, 30, 12);
+    av.shadow.fillStyle(0x000000, 0.3 * (1 - jh * 0.35));
+    av.shadow.fillEllipse(sx, sy, 30 * ss, 12 * ss);
     av.shadow.setDepth(isoDepth(av.displayX, av.displayY) - 0.01);
 
     // Position body sprite — jumpOffset lifts avatar during jump
@@ -2352,11 +2380,17 @@ export class IsoScene extends Phaser.Scene {
         const av = this.avatars.get(pushSlot);
         if (av) this.emitParticles(av.bodySprite.x, av.bodySprite.y, 0xffaa44, 6, 40);
       }
-      if (data.sessionId === this.mySessionId) this.playTone(250, 0.08, 'square', 0.06);
+      if (data.sessionId === this.mySessionId) { this.playTone(250, 0.08, 'square', 0.06); this.cameraShake(0.006, 120); }
     });
 
     room.onMessage('knockbackBlast', (data: { x: number; y: number }) => {
       this.sfxKnockback();
+      // Shake scaled by how close the blast is to the local player.
+      const me = this.avatars.get(this.mySlotIndex);
+      if (me) {
+        const dist = Math.hypot(me.tileX - data.x, me.tileY - data.y);
+        if (dist < 6) this.cameraShake(0.009 * (1 - dist / 6), 180);
+      }
       const { x, y } = tileToScreen(data.x, data.y);
       const wx = this.originX + x;
       const wy = this.originY + y + TILE_H / 2;
@@ -2391,6 +2425,13 @@ export class IsoScene extends Phaser.Scene {
             duration: 180,
             yoyo: true,
             ease: 'Quad.easeOut',
+            onComplete: () => {
+              // Landing: kick up dust and (for the local player) a tiny thud shake.
+              const { x, y } = tileToScreen(av.displayX, av.displayY);
+              this.emitDust(this.originX + x, this.originY + y + TILE_H / 2,
+                isoDepth(av.displayX, av.displayY) - 0.1, 6);
+              if (data.sessionId === this.mySessionId) this.cameraShake(0.004, 90);
+            },
           });
         }
       }
@@ -3042,6 +3083,40 @@ export class IsoScene extends Phaser.Scene {
     emitter.setDepth(10000);
     emitter.explode(count);
     this.time.delayedCall(600, () => emitter.destroy());
+  }
+
+  /** Low, soft dust puff at the ground (footsteps, landings). */
+  private emitDust(wx: number, wy: number, depth: number, count = 2): void {
+    const emitter = this.add.particles(wx, wy, 'particle', {
+      speed: { min: 8, max: 32 },
+      angle: { min: 200, max: 340 }, // upward-ish fan
+      scale: { start: 0.5, end: 0 },
+      alpha: { start: 0.5, end: 0 },
+      lifespan: 350,
+      tint: 0xb0a48f,
+      quantity: count,
+      emitting: false,
+    });
+    emitter.setDepth(depth);
+    emitter.explode(count);
+    this.time.delayedCall(500, () => emitter.destroy());
+  }
+
+  /** Brief camera shake for impacts. intensity ~0.002–0.01 of viewport. */
+  private cameraShake(intensity: number, duration: number): void {
+    this.cameras.main.shake(duration, intensity);
+  }
+
+  /** Small screen-space offset in the facing direction, for camera look-ahead. */
+  private facingScreenLead(dir: string): { x: number; y: number } {
+    const d = MOVE_DELTAS[dir];
+    if (!d) return { x: 0, y: 0 };
+    const o = tileToScreen(0, 0);
+    const p = tileToScreen(d[0], d[1]);
+    const vx = p.x - o.x, vy = p.y - o.y;
+    const len = Math.hypot(vx, vy) || 1;
+    const LEAD = 44;
+    return { x: (vx / len) * LEAD, y: (vy / len) * LEAD };
   }
 
   /** Emit particles at a tile position. */
