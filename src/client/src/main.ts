@@ -47,6 +47,28 @@ installVolumeControl(game);
 // Mobile: responsive panel sizing + a "rotate to landscape" nudge in portrait.
 installMobileStyles();
 installOrientationNudge();
+
+// Audio autoplay unlock. Browsers start the WebAudio context SUSPENDED and keep
+// Phaser's sound manager `locked` (queuing ALL music/SFX) until a user gesture.
+// Phaser listens on document.body, but on some mobile browsers that path doesn't
+// fire — the same class of issue that blocked the title tap — leaving the game
+// silent. So we drive it from our OWN DOM gesture listener (the reliable touch
+// primitive): resume the context, then set `unlocked` so the manager's next
+// update() clears the lock, emits UNLOCKED, and flushes the queued sounds.
+{
+  const AUDIO_EVENTS = ['touchend', 'touchstart', 'pointerup', 'mousedown', 'click', 'keydown'] as const;
+  const kickAudio = () => {
+    const sm = game.sound as Phaser.Sound.WebAudioSoundManager & { unlocked: boolean };
+    const ctx = sm.context as AudioContext | undefined;
+    const finish = () => {
+      sm.unlocked = true;
+      for (const ev of AUDIO_EVENTS) window.removeEventListener(ev, kickAudio);
+    };
+    if (!ctx || ctx.state === 'running') { finish(); return; }
+    ctx.resume().then(finish).catch(() => { /* try again on the next gesture */ });
+  };
+  for (const ev of AUDIO_EVENTS) window.addEventListener(ev, kickAudio, { passive: true });
+}
 // Expose for debugging / automated tests
 (window as unknown as { __game: Phaser.Game }).__game = game;
 
